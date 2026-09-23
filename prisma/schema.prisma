@@ -1,0 +1,246 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  CASHIER
+  STAFF
+}
+
+enum DeviceType {
+  PS4
+  PS5
+  PC
+  VIP_ROOM
+}
+
+enum DeviceStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum SessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum SlotType {
+  SINGLE
+  MULTI
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  WALLET
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  NO_SHOW
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String?
+  name      String
+  role      Role     @default(CASHIER)
+  createdAt DateTime @default(now())
+  shifts    Shift[]
+}
+
+model CashDrawer {
+  id           String                 @id @default(uuid())
+  name         String
+  balance      Float                  @default(0.0)
+  shifts       Shift[]
+  transactions FinancialTransaction[]
+}
+
+model Shift {
+  id              String                 @id @default(uuid())
+  userId          String
+  cashDrawerId    String
+  user            User                   @relation(fields: [userId], references: [id])
+  cashDrawer      CashDrawer             @relation(fields: [cashDrawerId], references: [id])
+  openingBalance  Float
+  closingBalance  Float?
+  actualCash      Float?
+  status          ShiftStatus            @default(OPEN)
+  openedAt        DateTime               @default(now())
+  closedAt        DateTime?
+  sessions        DeviceSession[]
+  orders          Order[]
+  transactions    FinancialTransaction[]
+}
+
+model Device {
+  id               String          @id @default(uuid())
+  name             String
+  type             DeviceType
+  singleHourlyRate Float
+  multiHourlyRate  Float
+  status           DeviceStatus    @default(AVAILABLE)
+  sessions         DeviceSession[]
+  bookings         Booking[]
+}
+
+model DeviceSession {
+  id            String        @id @default(uuid())
+  deviceId      String
+  shiftId       String
+  customerId    String?
+  device        Device        @relation(fields: [deviceId], references: [id])
+  shift         Shift         @relation(fields: [shiftId], references: [id])
+  customer      Customer?     @relation(fields: [customerId], references: [id])
+  startTime     DateTime      @default(now())
+  endTime       DateTime?
+  status        SessionStatus @default(ACTIVE)
+  timeCost      Float         @default(0.0)
+  totalCost     Float         @default(0.0)
+  isFixedTime   Boolean       @default(false)
+  fixedDuration Int?
+  slots         TimeSlot[]
+  orders        Order[]
+}
+
+model TimeSlot {
+  id        String        @id @default(uuid())
+  sessionId String
+  session   DeviceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type      SlotType      @default(SINGLE)
+  hourlyRate Float
+  startTime DateTime      @default(now())
+  endTime   DateTime?
+  totalCost Float         @default(0.0)
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String
+  products Product[]
+}
+
+model Product {
+  id            String          @id @default(uuid())
+  categoryId    String
+  category      Category        @relation(fields: [categoryId], references: [id])
+  name          String
+  barcode       String?         @unique
+  sellPrice     Float
+  costPrice     Float           @default(0.0)
+  stockQuantity Int             @default(0)
+  minStockAlert Int             @default(5)
+  orderItems    OrderItem[]
+  purchaseItems PurchaseItem[]
+}
+
+model Order {
+  id            String         @id @default(uuid())
+  shiftId       String
+  sessionId     String?
+  shift         Shift          @relation(fields: [shiftId], references: [id])
+  session       DeviceSession? @relation(fields: [sessionId], references: [id])
+  items         OrderItem[]
+  totalAmount   Float          @default(0.0)
+  paymentMethod PaymentMethod?
+  status        OrderStatus    @default(PENDING)
+  createdAt     DateTime       @default(now())
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  productId String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Float
+  subTotal  Float
+}
+
+model Supplier {
+  id        String            @id @default(uuid())
+  name      String
+  phone     String?
+  balance   Float             @default(0.0)
+  purchases PurchaseInvoice[]
+}
+
+model PurchaseInvoice {
+  id          String         @id @default(uuid())
+  supplierId  String
+  supplier    Supplier       @relation(fields: [supplierId], references: [id])
+  invoiceDate DateTime       @default(now())
+  totalAmount Float
+  paidAmount  Float          @default(0.0)
+  items       PurchaseItem[]
+}
+
+model PurchaseItem {
+  id        String          @id @default(uuid())
+  invoiceId  String
+  productId String
+  invoice   PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitCost  Float
+}
+
+model FinancialTransaction {
+  id           String        @id @default(uuid())
+  cashDrawerId String
+  shiftId      String?
+  cashDrawer   CashDrawer    @relation(fields: [cashDrawerId], references: [id])
+  shift        Shift?        @relation(fields: [shiftId], references: [id])
+  type         String
+  amount       Float
+  description  String
+  createdAt    DateTime      @default(now())
+}
+
+model Customer {
+  id       String          @id @default(uuid())
+  name     String
+  phone    String          @unique
+  loyaltyPts Int           @default(0)
+  debt     Float           @default(0.0)
+  sessions DeviceSession[]
+  bookings Booking[]
+}
+
+model Booking {
+  id         String        @id @default(uuid())
+  deviceId   String
+  customerId String
+  device     Device        @relation(fields: [deviceId], references: [id])
+  customer   Customer      @relation(fields: [customerId], references: [id])
+  startTime  DateTime
+  endTime    DateTime
+  status     BookingStatus @default(PENDING)
+  notes      String?
+}
