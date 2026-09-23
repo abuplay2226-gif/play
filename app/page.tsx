@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { getCurrentUser } from "@/app/actions/auth";
+import { createCustomerBooking } from "@/app/actions/customer-bookings";
 
 const services = [
   { title: "جلسات PS5", text: "أجهزة حديثة + شاشات 4K + تجربة لعب سريعة", price: "من 45 ج.م / ساعة" },
@@ -225,44 +226,42 @@ export default async function Home() {
             </div>
           </div>
 
-          <form className="space-y-5 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
+          <form action={createCustomerBooking} className="space-y-5 rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
-                <label className="mb-2 block text-sm text-slate-300">اسم العميل</label>
-                <input className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="أدخل اسمك" />
+                <label htmlFor="name" className="mb-2 block text-sm text-slate-300">اسم العميل</label>
+                <input id="name" name="name" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="أدخل اسمك" required />
               </div>
               <div>
-                <label className="mb-2 block text-sm text-slate-300">رقم الهاتف</label>
-                <input className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="05XXXXXXXX" />
+                <label htmlFor="phone" className="mb-2 block text-sm text-slate-300">رقم الهاتف</label>
+                <input id="phone" name="phone" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="05XXXXXXXX" required />
               </div>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
-                <label className="mb-2 block text-sm text-slate-300">نوع الخدمة</label>
-                <select className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400">
-                  <option>جلسة PS5</option>
-                  <option>غرفة VIP</option>
-                  <option>كافيه</option>
-                  <option>باقة العائلة</option>
+                <label htmlFor="serviceType" className="mb-2 block text-sm text-slate-300">نوع الخدمة</label>
+                <select id="serviceType" name="serviceType" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400">
+                  <option value="PS5">جلسة PS5</option>
+                  <option value="VIP">غرفة VIP</option>
+                  <option value="PC">جلسة PC</option>
+                  <option value="PS4">جلسة PS4</option>
                 </select>
               </div>
               <div>
-                <label className="mb-2 block text-sm text-slate-300">اليوم</label>
-                <select className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400">
-                  <option>اليوم</option>
-                  <option>غدًا</option>
-                  <option>الأحد</option>
-                </select>
+                <label htmlFor="bookingDate" className="mb-2 block text-sm text-slate-300">اليوم</label>
+                <input id="bookingDate" name="bookingDate" type="date" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" required />
               </div>
             </div>
 
             <div>
-              <label className="mb-2 block text-sm text-slate-300">الوقت المفضل</label>
-              <input type="time" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" defaultValue="19:00" />
+              <label htmlFor="bookingTime" className="mb-2 block text-sm text-slate-300">الوقت المفضل</label>
+              <input id="bookingTime" name="bookingTime" type="time" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" defaultValue="19:00" />
             </div>
 
-            <button type="button" className="w-full rounded-full bg-gradient-to-r from-amber-300 to-orange-500 px-5 py-3 text-base font-black text-slate-950 shadow-lg shadow-orange-500/25">
+            <input type="hidden" name="notes" value="حجز من الصفحة الرئيسية" />
+
+            <button type="submit" className="w-full rounded-full bg-gradient-to-r from-amber-300 to-orange-500 px-5 py-3 text-base font-black text-slate-950 shadow-lg shadow-orange-500/25">
               تأكيد الحجز
             </button>
           </form>
