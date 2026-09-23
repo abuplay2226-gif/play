@@ -56,14 +56,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="mt-8 flex justify-center gap-4 text-xs text-slate-400">
-          <Link href="/admin/login" className="underline decoration-dotted underline-offset-4 hover:text-violet-300">
-            دخول المدير
-          </Link>
-          <Link href="/staff/login" className="underline decoration-dotted underline-offset-4 hover:text-sky-300">
-            دخول الموظف
-          </Link>
-        </div>
       </div>
     </main>
   );
