@@ -56,11 +56,11 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="mt-8 flex flex-wrap gap-3 text-sm text-slate-300">
-          <Link href="/admin/login" className="rounded-full border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-violet-200 hover:border-violet-400">
+        <div className="mt-8 flex justify-center gap-4 text-xs text-slate-400">
+          <Link href="/admin/login" className="underline decoration-dotted underline-offset-4 hover:text-violet-300">
             دخول المدير
           </Link>
-          <Link href="/staff/login" className="rounded-full border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sky-200 hover:border-sky-400">
+          <Link href="/staff/login" className="underline decoration-dotted underline-offset-4 hover:text-sky-300">
             دخول الموظف
           </Link>
         </div>
