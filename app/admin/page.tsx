@@ -1,15 +1,17 @@
 import Link from "next/link";
 
 import { requireRole } from "@/app/actions/auth";
+import { getDashboardSummary } from "@/app/actions/reports";
 import { getUsers } from "@/app/actions/users";
 import { SiteShell } from "@/components/site-shell";
 
-const adminSummary = [
-  { title: "إيراد اليوم", value: "8,450 ج.م", accent: "text-emerald-300" },
-  { title: "الجلسات النشطة", value: "14", accent: "text-sky-300" },
-  { title: "المخزون المنخفض", value: "5", accent: "text-amber-300" },
-  { title: "الطلبات", value: "27", accent: "text-violet-300" },
-];
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("ar-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 const quickLinks = [
   { label: "إدارة الموظفين", href: "/users" },
@@ -21,12 +23,22 @@ const quickLinks = [
 export default async function AdminPage() {
   await requireRole(["ADMIN"]);
 
-  const users = (await getUsers()) as Array<{
-    id: string;
-    name: string | null;
-    email: string;
-    role: "ADMIN" | "CASHIER" | "STAFF";
-  }>;
+  const [summary, users] = await Promise.all([
+    getDashboardSummary(),
+    getUsers() as Promise<Array<{
+      id: string;
+      name: string | null;
+      email: string;
+      role: "ADMIN" | "CASHIER" | "STAFF";
+    }>>,
+  ]);
+
+  const adminSummary = [
+    { title: "إيراد اليوم", value: formatCurrency(summary.totalSales), accent: "text-emerald-300" },
+    { title: "الجلسات النشطة", value: String(summary.activeSessions), accent: "text-sky-300" },
+    { title: "المخزون المنخفض", value: String(summary.lowStock), accent: "text-amber-300" },
+    { title: "الطلبات", value: String(summary.ordersCount), accent: "text-violet-300" },
+  ];
 
   return (
     <SiteShell title="لوحة المدير">

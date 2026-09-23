@@ -1,13 +1,16 @@
 import Link from "next/link";
 
 import { requireRole, signOut } from "@/app/actions/auth";
+import { getDevices } from "@/app/actions/devices";
+import { getDashboardSummary } from "@/app/actions/reports";
 
-const board = [
-  { title: "الأجهزة المتاحة", value: "8", accent: "text-emerald-300" },
-  { title: "الطلبات الجديدة", value: "12", accent: "text-amber-300" },
-  { title: "الحجوزات اليوم", value: "17", accent: "text-sky-300" },
-  { title: "إيرادات اليوم", value: "2,140 ج.م", accent: "text-violet-300" },
-];
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("ar-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
 const quickActions = [
   { label: "فتح شيفت", href: "/shifts" },
@@ -18,6 +21,20 @@ const quickActions = [
 
 export default async function StaffPage() {
   await requireRole(["STAFF", "ADMIN", "CASHIER"]);
+
+  const [summary, devices] = await Promise.all([getDashboardSummary(), getDevices()]);
+
+  const board = [
+    { title: "الأجهزة المتاحة", value: String(devices.filter((device) => device.status === "AVAILABLE").length), accent: "text-emerald-300" },
+    { title: "الطلبات الجديدة", value: String(summary.ordersToday), accent: "text-amber-300" },
+    { title: "الحجوزات اليوم", value: String(summary.ordersCount), accent: "text-sky-300" },
+    { title: "إيرادات اليوم", value: formatCurrency(summary.totalSales), accent: "text-violet-300" },
+  ];
+
+  const devicesList = devices.slice(0, 4).map((device) => ({
+    label: device.name,
+    status: device.status === "AVAILABLE" ? "متاح" : device.status === "OCCUPIED" ? "مشغول" : device.status === "MAINTENANCE" ? "صيانة" : "متاح",
+  }));
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#050816] text-white">
@@ -81,12 +98,7 @@ export default async function StaffPage() {
           <div className="rounded-[28px] border border-slate-800 bg-slate-900/90 p-5">
             <h2 className="text-2xl font-black text-white">جداول التشغيل</h2>
             <div className="mt-5 space-y-3">
-              {[
-                { label: "PS5 - 01", status: "مشغول" },
-                { label: "PS5 - 02", status: "متاح" },
-                { label: "VIP Room", status: "محجوز" },
-                { label: "PC - 03", status: "متاح" },
-              ].map((item) => (
+              {devicesList.map((item) => (
                 <div key={item.label} className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
                   <span className="font-bold text-white">{item.label}</span>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
@@ -107,9 +119,9 @@ export default async function StaffPage() {
             <h2 className="text-2xl font-black text-white">الطلبات الحالية</h2>
             <div className="mt-5 space-y-3">
               {[
-                { item: "قهوة عربي", value: "18 ج.م", tone: "text-amber-300" },
-                { item: "بيتزا صغيرة", value: "58 ج.م", tone: "text-emerald-300" },
-                { item: "جلسة PS5", value: "60 ج.م", tone: "text-sky-300" },
+                { item: "إجمالي الطلبات", value: String(summary.ordersCount), tone: "text-amber-300" },
+                { item: "الجلسات النشطة", value: String(summary.activeSessions), tone: "text-emerald-300" },
+                { item: "إيراد المبيعات", value: formatCurrency(summary.totalSales), tone: "text-sky-300" },
               ].map((entry) => (
                 <div key={entry.item} className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
                   <span className="font-bold text-white">{entry.item}</span>
