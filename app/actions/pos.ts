@@ -2,12 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 
+import { assertAuthorized } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 import type { PaymentMethod } from "@prisma/client";
 
 const toNumber = (value: number | string | null | undefined) => Number(value ?? 0);
 
-function normalizeItems(items: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>) {
+function normalizeItems(
+  items: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>
+) {
   return items
     .filter((item) => item && item.productId && Number(item.quantity ?? 0) > 0)
     .map((item) => ({
@@ -15,27 +18,6 @@ function normalizeItems(items: Array<{ productId: string; quantity: number; unit
       quantity: Number(item.quantity),
       unitPrice: toNumber(item.unitPrice),
     }));
-}
-
-async function assertValidShift(shiftId: string) {
-  const shift = await prisma.shift.findUnique({
-    where: { id: shiftId },
-    include: { cashDrawer: true },
-  });
-
-  if (!shift) {
-    throw new Error("الوردية غير موجودة");
-  }
-
-  if (shift.status !== "OPEN") {
-    throw new Error("لا توجد وردية مفتوحة للمعاملة");
-  }
-
-  if (!shift.cashDrawerId) {
-    throw new Error("لا توجد خزينة مرتبطة بالوردية");
-  }
-
-  return shift;
 }
 
 export async function getCategories() {
@@ -46,30 +28,18 @@ export async function getCategories() {
 }
 
 export async function createCategory(input: { name: string }) {
+  await assertAuthorized(["ADMIN"]);
   const name = input.name.trim();
+  if (!name) throw new Error("اسم التصنيف مطلوب");
 
-  if (!name) {
-    throw new Error("اسم التصنيف مطلوب");
-  }
-
-  const category = await prisma.category.create({
-    data: { name },
-  });
-
-  revalidatePath("/");
+  const category = await prisma.category.create({ data: { name } });
+  revalidatePath("/pos");
+  revalidatePath("/inventory");
   return category;
 }
 
 export async function getProducts() {
   return prisma.product.findMany({
-    include: { category: true },
-    orderBy: { name: "asc" },
-  });
-}
-
-export async function getProductsByCategory(categoryId: string) {
-  return prisma.product.findMany({
-    where: { categoryId },
     include: { category: true },
     orderBy: { name: "asc" },
   });
@@ -84,14 +54,11 @@ export async function createProduct(input: {
   stockQuantity?: number | string;
   minStockAlert?: number | string;
 }) {
+  await assertAuthorized(["ADMIN"]);
   const name = input.name.trim();
 
-  if (!name) {
-    throw new Error("اسم المنتج مطلوب");
-  }
-
-  if (!input.categoryId) {
-    throw new Error("التصنيف مطلوب");
+  if (!name || !input.categoryId) {
+    throw new Error("اسم المنتج وتصنيفه مطلوبان");
   }
 
   const product = await prisma.product.create({
@@ -106,25 +73,8 @@ export async function createProduct(input: {
     },
   });
 
-  revalidatePath("/");
-  return product;
-}
-
-export async function updateProductStock(productId: string, deltaQty: number) {
-  if (!productId) {
-    throw new Error("معرف المنتج مطلوب");
-  }
-
-  const product = await prisma.product.update({
-    where: { id: productId },
-    data: {
-      stockQuantity: {
-        increment: Number(deltaQty),
-      },
-    },
-  });
-
-  revalidatePath("/");
+  revalidatePath("/pos");
+  revalidatePath("/inventory");
   return product;
 }
 
@@ -134,249 +84,162 @@ export async function createOrder(input: {
   paymentMethod?: PaymentMethod;
   items: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>;
 }) {
-  if (!input.shiftId) {
-    throw new Error("معرف الوردية مطلوب");
-  }
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const items = normalizeItems(input.items);
+  if (items.length === 0) throw new Error("يجب إضافة صنف واحد على الأقل");
 
-  if (items.length === 0) {
-    throw new Error("يجب إضافة منتج واحد على الأقل للطلب");
-  }
+  const shift = await prisma.shift.findUnique({
+    where: { id: input.shiftId },
+    include: { cashDrawer: true },
+  });
 
-  const shift = await assertValidShift(input.shiftId);
-
-  if (input.sessionId) {
-    const session = await prisma.deviceSession.findUnique({
-      where: { id: input.sessionId },
-    });
-
-    if (!session) {
-      throw new Error("الجلسة غير موجودة");
-    }
-
-    if (session.shiftId !== input.shiftId) {
-      throw new Error("الجلسة لا تنتمي إلى نفس الوردية");
-    }
-  }
+  if (!shift || shift.status !== "OPEN") throw new Error("لا توجد وردية مفتوحة للمعاملة");
 
   const orderStatus = input.sessionId ? "PENDING" : "PAID";
-  const paymentMethod = input.paymentMethod ?? (input.sessionId ? null : "CASH");
+  const finalPaymentMethod = input.paymentMethod ?? (input.sessionId ? null : "CASH");
 
-  const details = await Promise.all(
-    items.map(async (item) => {
-      const product = await prisma.product.findUnique({
+  return await prisma.$transaction(async (tx) => {
+    const details = [];
+
+    for (const item of items) {
+      // 1. جلب المنتج الأساسي
+      const product = await tx.product.findUnique({
         where: { id: item.productId },
       });
 
-      if (!product) {
-        throw new Error("إحدى المنتجات غير موجودة");
-      }
+      if (!product) throw new Error("إحدى المنتجات غير موجودة");
 
-      if (product.stockQuantity < item.quantity) {
-        throw new Error(`المخزون غير كافي لـ ${product.name}`);
-      }
+      // 2. جلب مكونات الوصفة بشكل آمن متوافق مع البريزما
+      const recipeItems = ((await (tx as any).recipeItem?.findMany({
+        where: { productId: item.productId },
+        include: { ingredient: true },
+      })) ?? []) as Array<{
+        ingredientId: string;
+        quantity: number;
+        ingredient: { name: string; stockQuantity: number };
+      }>;
 
-      const unitPrice = item.unitPrice > 0 ? item.unitPrice : product.sellPrice;
-
-      return {
-        productId: item.productId,
-        productName: product.name,
-        quantity: item.quantity,
-        unitPrice: Number(unitPrice),
-        subTotal: Number((item.quantity * Number(unitPrice)).toFixed(2)),
-      };
-    }),
-  );
-
-  const totalAmount = Number(details.reduce((sum, item) => sum + item.subTotal, 0).toFixed(2));
-
-  const createdOrder = await prisma.$transaction(async (tx) => {
-    for (const detail of details) {
-      await tx.product.update({
-        where: { id: detail.productId },
-        data: {
-          stockQuantity: {
-            decrement: detail.quantity,
-          },
-        },
-      });
-    }
-
-    return tx.order.create({
-      data: {
-        shiftId: input.shiftId,
-        sessionId: input.sessionId ?? null,
-        totalAmount,
-        paymentMethod: paymentMethod ?? undefined,
-        status: orderStatus,
-        items: {
-          create: details.map((detail) => ({
-            productId: detail.productId,
-            quantity: detail.quantity,
-            unitPrice: detail.unitPrice,
-            subTotal: detail.subTotal,
-          })),
-        },
-      },
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-      },
-    });
-  });
-
-  revalidatePath("/");
-  return createdOrder;
-}
-
-export async function cancelOrder(orderId: string) {
-  if (!orderId) {
-    throw new Error("معرف الطلب مطلوب");
-  }
-
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { items: true },
-  });
-
-  if (!order) {
-    throw new Error("الطلب غير موجود");
-  }
-
-  if (order.status === "CANCELLED") {
-    throw new Error("الطلب ملغي بالفعل");
-  }
-
-  await prisma.$transaction(async (tx) => {
-    for (const item of order.items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: {
-          stockQuantity: {
-            increment: item.quantity,
-          },
-        },
-      });
-    }
-
-    await tx.order.update({
-      where: { id: orderId },
-      data: {
-        status: "CANCELLED",
-      },
-    });
-  });
-
-  revalidatePath("/");
-  return true;
-}
-
-export async function updateOrderItems(
-  orderId: string,
-  nextItems: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>,
-) {
-  if (!orderId) {
-    throw new Error("معرف الطلب مطلوب");
-  }
-
-  const normalized = normalizeItems(nextItems);
-
-  if (normalized.length === 0) {
-    throw new Error("يجب أن يحتوي الطلب على منتج واحد على الأقل");
-  }
-
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { items: true },
-  });
-
-  if (!order) {
-    throw new Error("الطلب غير موجود");
-  }
-
-  const currentByProduct = new Map(order.items.map((item) => [item.productId, item]));
-
-  await prisma.$transaction(async (tx) => {
-    for (const existing of order.items) {
-      const nextItem = normalized.find((item) => item.productId === existing.productId);
-      if (!nextItem) {
-        await tx.product.update({
-          where: { id: existing.productId },
-          data: { stockQuantity: { increment: existing.quantity } },
-        });
-      } else if (nextItem.quantity !== existing.quantity) {
-        const diff = nextItem.quantity - existing.quantity;
-        if (diff > 0) {
-          const product = await tx.product.findUnique({ where: { id: existing.productId } });
-          if (!product || product.stockQuantity < diff) {
-            throw new Error(`المخزون غير كافي لـ ${product?.name ?? "المنتج"}`);
+      // 3. إذا كان للمنتج مقادير ووصفة (BOM) يُخصم من المواد الخام
+      if (recipeItems.length > 0) {
+        for (const recipe of recipeItems) {
+          const neededQty = recipe.quantity * item.quantity;
+          if (recipe.ingredient.stockQuantity < neededQty) {
+            throw new Error(
+              `خام (${recipe.ingredient.name}) غير كافي لتجهيز ${item.quantity} من ${product.name}`
+            );
           }
-        }
-        await tx.product.update({
-          where: { id: existing.productId },
-          data: { stockQuantity: { increment: -diff } },
-        });
-      }
-    }
 
-    for (const item of normalized) {
-      if (!currentByProduct.has(item.productId)) {
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product || product.stockQuantity < item.quantity) {
-          throw new Error(`المخزون غير كافي لـ ${product?.name ?? "المنتج"}`);
+          await tx.product.update({
+            where: { id: recipe.ingredientId },
+            data: { stockQuantity: { decrement: neededQty } },
+          });
         }
+      } else {
+        // إذا كان منتجاً عادياً (مياه، كانز، شيبس) يُخصم بالقطعة
+        if (product.stockQuantity < item.quantity) {
+          throw new Error(`المخزون غير كافي للصنف: ${product.name}`);
+        }
+
         await tx.product.update({
           where: { id: item.productId },
           data: { stockQuantity: { decrement: item.quantity } },
         });
       }
+
+      const unitPrice = item.unitPrice > 0 ? item.unitPrice : product.sellPrice;
+      const subTotal = Number((item.quantity * Number(unitPrice)).toFixed(2));
+
+      details.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: Number(unitPrice),
+        subTotal,
+      });
     }
 
-    await tx.orderItem.deleteMany({ where: { orderId } });
+    const totalAmount = Number(details.reduce((sum, i) => sum + i.subTotal, 0).toFixed(2));
 
-    const total = await Promise.all(
-      normalized.map(async (item) => {
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        const unitPrice = item.unitPrice > 0 ? item.unitPrice : product?.sellPrice ?? 0;
-        const subTotal = Number((item.quantity * Number(unitPrice)).toFixed(2));
-
-        await tx.orderItem.create({
-          data: {
-            orderId,
-            productId: item.productId,
-            quantity: item.quantity,
-            unitPrice: Number(unitPrice),
-            subTotal,
-          },
-        });
-
-        return subTotal;
-      }),
-    );
-
-    await tx.order.update({
-      where: { id: orderId },
+    const createdOrder = await tx.order.create({
       data: {
-        totalAmount: Number(total.reduce((sum, value) => sum + value, 0).toFixed(2)),
+        shiftId: input.shiftId,
+        sessionId: input.sessionId ?? null,
+        totalAmount,
+        paymentMethod: finalPaymentMethod ?? undefined,
+        status: orderStatus,
+        items: { create: details },
+      },
+      include: {
+        items: { include: { product: true } },
       },
     });
-  });
 
-  revalidatePath("/");
-  return true;
+    if (orderStatus === "PAID" && finalPaymentMethod === "CASH" && shift.cashDrawerId) {
+      await tx.cashDrawer.update({
+        where: { id: shift.cashDrawerId },
+        data: { balance: { increment: totalAmount } },
+      });
+
+      await tx.financialTransaction.create({
+        data: {
+          cashDrawerId: shift.cashDrawerId,
+          shiftId: input.shiftId,
+          type: "INCOME",
+          amount: totalAmount,
+          description: `مبيعات كافيه - طلب #${createdOrder.id.slice(-6)}`,
+        },
+      });
+    }
+
+    revalidatePath("/pos");
+    revalidatePath("/inventory");
+    return createdOrder;
+  });
 }
 
-export async function getOrdersByShift(shiftId: string) {
-  return prisma.order.findMany({
-    where: { shiftId },
-    include: {
-      items: { include: { product: true } },
-      session: true,
-    },
-    orderBy: { createdAt: "desc" },
+export async function cancelOrder(orderId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  return await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, shift: true },
+    });
+
+    if (!order) throw new Error("الطلب غير موجود");
+    if (order.status === "CANCELLED") throw new Error("الطلب ملغي بالفعل");
+
+    for (const item of order.items) {
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { stockQuantity: { increment: item.quantity } },
+      });
+    }
+
+    if (order.status === "PAID" && order.paymentMethod === "CASH" && order.shift?.cashDrawerId) {
+      await tx.cashDrawer.update({
+        where: { id: order.shift.cashDrawerId },
+        data: { balance: { decrement: order.totalAmount } },
+      });
+
+      await tx.financialTransaction.create({
+        data: {
+          cashDrawerId: order.shift.cashDrawerId,
+          shiftId: order.shiftId,
+          type: "EXPENSE",
+          amount: order.totalAmount,
+          description: `إلغاء واسترجاع طلب #${order.id.slice(-6)}`,
+        },
+      });
+    }
+
+    const cancelled = await tx.order.update({
+      where: { id: orderId },
+      data: { status: "CANCELLED" },
+    });
+
+    revalidatePath("/pos");
+    revalidatePath("/inventory");
+    return cancelled;
   });
 }

@@ -1,7 +1,8 @@
 import Link from "next/link";
 
-import { requireRole } from "@/app/actions/auth";
+import { getCurrentUser, requireRole } from "@/app/actions/auth";
 import { createCustomerBooking, getCustomerBookings, type CustomerBookingRow } from "@/app/actions/customer-bookings";
+import { BookingCountdown } from "@/components/booking-countdown";
 
 const offers = [
   { title: "باقة عطلة نهاية الأسبوع", text: "جلسة مزدوجة + مشروبات + خصم 15%" },
@@ -11,7 +12,10 @@ const offers = [
 export default async function CustomerPage() {
   await requireRole(["CUSTOMER", "ADMIN"]);
 
-  const bookings = (await getCustomerBookings()) as CustomerBookingRow[];
+  const user = await getCurrentUser();
+  const customerPhone = user?.phone ?? null;
+  const bookings = customerPhone ? ((await getCustomerBookings(customerPhone)) as CustomerBookingRow[]) : [];
+  const activeNotifications = bookings.filter((booking) => booking.status !== "CANCELLED").slice(0, 3);
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#050816] text-white">
@@ -60,22 +64,27 @@ export default async function CustomerPage() {
             <div className="mt-5 space-y-4">
               {bookings.length > 0 ? (
                 bookings.slice(0, 5).map((booking) => (
-                  <div key={booking.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-                    <div>
-                      <p className="font-bold text-white">{booking.device.name}</p>
-                      <p className="mt-1 text-sm text-slate-400">
-                        {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(booking.startTime))}
-                      </p>
+                  <div key={booking.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-white">{booking.device.name}</p>
+                        <p className="mt-1 text-sm text-slate-400">
+                          {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(booking.startTime))}
+                        </p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        booking.status === "CONFIRMED"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : booking.status === "PENDING"
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "bg-rose-500/15 text-rose-300"
+                      }`}>
+                        {booking.status}
+                      </span>
                     </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                      booking.status === "CONFIRMED"
-                        ? "bg-emerald-500/15 text-emerald-300"
-                        : booking.status === "PENDING"
-                          ? "bg-amber-500/15 text-amber-300"
-                          : "bg-rose-500/15 text-rose-300"
-                    }`}>
-                      {booking.status}
-                    </span>
+                    <div className="mt-4">
+                      <BookingCountdown startTime={booking.startTime} endTime={new Date(new Date(booking.startTime).getTime() + 60 * 60 * 1000)} status={booking.status} />
+                    </div>
                   </div>
                 ))
               ) : (
@@ -87,7 +96,20 @@ export default async function CustomerPage() {
           </div>
 
           <div className="rounded-[28px] border border-white/10 bg-slate-900/80 p-5">
-            <h2 className="text-2xl font-black text-white">عروض اليوم</h2>
+            <h2 className="text-2xl font-black text-white">إشعارات الحجز</h2>
+            <div className="mt-5 space-y-4">
+              {activeNotifications.length > 0 ? (
+                activeNotifications.map((booking) => (
+                  <BookingCountdown key={booking.id} startTime={booking.startTime} endTime={new Date(new Date(booking.startTime).getTime() + 60 * 60 * 1000)} status={booking.status} compact />
+                ))
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 p-5 text-slate-300">
+                  لا توجد إشعارات جديدة.
+                </div>
+              )}
+            </div>
+
+            <h2 className="mt-8 text-2xl font-black text-white">عروض اليوم</h2>
             <div className="mt-5 space-y-4">
               {offers.map((offer) => (
                 <div key={offer.title} className="rounded-2xl border border-amber-400/20 bg-amber-500/10 p-4">

@@ -2,7 +2,7 @@ import { requireRole } from "@/app/actions/auth";
 import { SiteShell } from "@/components/site-shell";
 import { prisma } from "@/lib/prisma";
 
-export default async function ReportsPage() {
+export default async function FinancialPage() {
   await requireRole(["ADMIN", "CASHIER"]);
 
   const todayStart = new Date();
@@ -23,7 +23,6 @@ export default async function ReportsPage() {
     _sum: { amount: true },
   });
 
-  // مبيعات الفيزا من جدول الطلبات إن وجدت
   const cardOrders = await prisma.order.aggregate({
     where: {
       paymentMethod: "CARD",
@@ -42,30 +41,23 @@ export default async function ReportsPage() {
     _sum: { amount: true },
   });
 
-  // 4. عدد الطلبات اليوم
+  // 4. إجمالي الطلبات اليوم
   const ordersCount = await prisma.order.count({
     where: { createdAt: { gte: todayStart } },
   });
 
-  // إجمالي نقدية الخزن الورقية
   const totalDrawerCash = cashDrawers.reduce((sum, d) => sum + d.balance, 0);
   const totalSupplierDebt = suppliers.reduce((sum, s) => sum + (s.balance > 0 ? s.balance : 0), 0);
 
-  // حساب مبيعات الفيزا بدقة (يشمل العمليات المسجلة وحساب الفارق التلقائي إن وجد)
   const recordedCard = Number(cardTransactions._sum.amount ?? 0) || Number(cardOrders._sum.totalAmount ?? 0);
-  
-  // إيراد اليوم الشامل (المبيعات الكلية)
   const totalCashIncome = Number(cashTransactions._sum.amount ?? 0);
   const totalTodayRevenue = totalCashIncome > 0 ? (totalCashIncome + recordedCard) : (totalDrawerCash + (recordedCard || 15));
-  
-  // مبيعات الفيزا المحسوبة
   const todayCardRevenue = recordedCard > 0 ? recordedCard : Math.max(0, totalTodayRevenue - totalDrawerCash);
 
   return (
     <SiteShell title="الحسابات المالية">
       {/* شبكة الكروت الإحصائية الخمسة مع كارت الفيزا المخصص */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
-        {/* إيراد اليوم الكلي الشامل */}
         <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
           <span className="text-xs text-slate-400 block">إيراد اليوم الشامل (كاش + فيزا)</span>
           <p className="mt-3 text-2xl font-black font-mono text-emerald-400">
@@ -73,7 +65,6 @@ export default async function ReportsPage() {
           </p>
         </article>
 
-        {/* إجمالي كاش الخزن */}
         <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
           <span className="text-xs text-slate-400 block">💵 إجمالي نقدية الخزن (كاش)</span>
           <p className="mt-3 text-2xl font-black font-mono text-white">
@@ -81,7 +72,7 @@ export default async function ReportsPage() {
           </p>
         </article>
 
-        {/* كارت مبيعات الفيزا المستقل */}
+        {/* كارت مبيعات الفيزا المخصص */}
         <article className="rounded-3xl border border-sky-500/40 bg-slate-900/90 p-5 shadow-xl shadow-sky-950/30">
           <span className="text-xs text-sky-400 block font-bold">💳 مبيعات الفيزا / البنك (اليوم)</span>
           <p className="mt-3 text-2xl font-black font-mono text-sky-300">
@@ -90,7 +81,6 @@ export default async function ReportsPage() {
           <span className="text-[10px] text-slate-400 block mt-1">تطابق مع إيصال ماكينة البنك POS</span>
         </article>
 
-        {/* ديون الموردين */}
         <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
           <span className="text-xs text-slate-400 block">ديون الموردين المستحقة</span>
           <p className="mt-3 text-2xl font-black font-mono text-amber-400">
@@ -98,7 +88,6 @@ export default async function ReportsPage() {
           </p>
         </article>
 
-        {/* عدد الطلبات */}
         <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
           <span className="text-xs text-slate-400 block">الطلبات المسجلة</span>
           <p className="mt-3 text-2xl font-black font-mono text-violet-400">
@@ -107,9 +96,7 @@ export default async function ReportsPage() {
         </article>
       </div>
 
-      {/* تفاصيل الخزن والموردين */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* ملخص الخزن وقنوات السداد */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
             <h2 className="text-lg font-bold text-white">ملخص الخزن وقنوات التحصيل</h2>
@@ -133,7 +120,6 @@ export default async function ReportsPage() {
               </div>
             ))}
 
-            {/* سطر ماكينة الفيزا */}
             <div className="flex items-center justify-between p-3.5 rounded-2xl bg-sky-950/30 border border-sky-500/30 text-xs">
               <div className="flex items-center gap-2">
                 <span>💳</span>
@@ -147,7 +133,6 @@ export default async function ReportsPage() {
           </div>
         </div>
 
-        {/* ملخص الموردين */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
             <h2 className="text-lg font-bold text-white">ملخص حسابات الموردين</h2>
@@ -175,12 +160,6 @@ export default async function ReportsPage() {
                 </span>
               </div>
             ))}
-
-            {suppliers.length === 0 && (
-              <p className="text-center text-xs text-slate-500 py-6">
-                لا يوجد موردين مسجلين حالياً.
-              </p>
-            )}
           </div>
         </div>
       </div>

@@ -5,6 +5,9 @@ import type { ReactNode } from "react";
 const navItems = [
   { label: "لوحة التحكم", href: "/" },
   { label: "الأجهزة", href: "/devices" },
+  { label: "العملاء", href: "/customers" },
+  { label: "الخزائن", href: "/cash-drawers" },
+  { label: "الحسابات", href: "/financial" },
   { label: "الورديات", href: "/shifts" },
   { label: "نقاط البيع", href: "/pos" },
   { label: "الحجوزات", href: "/bookings" },

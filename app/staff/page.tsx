@@ -4,6 +4,9 @@ import { requireRole, signOut } from "@/app/actions/auth";
 import { getDevices } from "@/app/actions/devices";
 import { getDashboardSummary } from "@/app/actions/reports";
 
+type DashboardSummary = Awaited<ReturnType<typeof getDashboardSummary>>;
+type DeviceRecord = Awaited<ReturnType<typeof getDevices>>[number];
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("ar-EG", {
     style: "currency",
@@ -22,16 +25,19 @@ const quickActions = [
 export default async function StaffPage() {
   await requireRole(["STAFF", "ADMIN", "CASHIER"]);
 
-  const [summary, devices] = await Promise.all([getDashboardSummary(), getDevices()]);
+  const [summary, devices]: [DashboardSummary, DeviceRecord[]] = await Promise.all([
+    getDashboardSummary(),
+    getDevices(),
+  ]);
 
-  const board = [
-    { title: "الأجهزة المتاحة", value: String(devices.filter((device) => device.status === "AVAILABLE").length), accent: "text-emerald-300" },
+  const board: Array<{ title: string; value: string; accent: string }> = [
+    { title: "الأجهزة المتاحة", value: String(devices.filter((device: DeviceRecord) => device.status === "AVAILABLE").length), accent: "text-emerald-300" },
     { title: "الطلبات الجديدة", value: String(summary.ordersToday), accent: "text-amber-300" },
     { title: "الحجوزات اليوم", value: String(summary.ordersCount), accent: "text-sky-300" },
     { title: "إيرادات اليوم", value: formatCurrency(summary.totalSales), accent: "text-violet-300" },
   ];
 
-  const devicesList = devices.slice(0, 4).map((device) => ({
+  const devicesList: Array<{ label: string; status: string }> = devices.slice(0, 4).map((device: DeviceRecord) => ({
     label: device.name,
     status: device.status === "AVAILABLE" ? "متاح" : device.status === "OCCUPIED" ? "مشغول" : device.status === "MAINTENANCE" ? "صيانة" : "متاح",
   }));
@@ -78,7 +84,7 @@ export default async function StaffPage() {
         </section>
 
         <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          {board.map((item) => (
+          {board.map((item: { title: string; value: string; accent: string }) => (
             <div key={item.title} className="rounded-[24px] border border-slate-800 bg-slate-900/90 p-5">
               <p className="text-sm text-slate-400">{item.title}</p>
               <p className={`mt-4 text-3xl font-black ${item.accent}`}>{item.value}</p>
@@ -87,7 +93,7 @@ export default async function StaffPage() {
         </div>
 
         <div className="mt-8 mb-6 flex flex-wrap gap-3">
-          {quickActions.map((action) => (
+          {quickActions.map((action: { label: string; href: string }) => (
             <Link key={action.href} href={action.href} className="rounded-full border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-sm font-bold text-sky-200 hover:border-sky-400">
               {action.label}
             </Link>
@@ -98,7 +104,7 @@ export default async function StaffPage() {
           <div className="rounded-[28px] border border-slate-800 bg-slate-900/90 p-5">
             <h2 className="text-2xl font-black text-white">جداول التشغيل</h2>
             <div className="mt-5 space-y-3">
-              {devicesList.map((item) => (
+              {devicesList.map((item: { label: string; status: string }) => (
                 <div key={item.label} className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
                   <span className="font-bold text-white">{item.label}</span>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
@@ -122,7 +128,7 @@ export default async function StaffPage() {
                 { item: "إجمالي الطلبات", value: String(summary.ordersCount), tone: "text-amber-300" },
                 { item: "الجلسات النشطة", value: String(summary.activeSessions), tone: "text-emerald-300" },
                 { item: "إيراد المبيعات", value: formatCurrency(summary.totalSales), tone: "text-sky-300" },
-              ].map((entry) => (
+              ].map((entry: { item: string; value: string; tone: string }) => (
                 <div key={entry.item} className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
                   <span className="font-bold text-white">{entry.item}</span>
                   <span className={`font-black ${entry.tone}`}>{entry.value}</span>

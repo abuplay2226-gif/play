@@ -17,6 +17,7 @@ const quickLinks = [
   { label: "إدارة الموظفين", href: "/users" },
   { label: "التقارير", href: "/reports" },
   { label: "الأجهزة", href: "/devices" },
+  { label: "إدارة المحتوى", href: "/admin/content" },
   { label: "نقاط البيع", href: "/pos" },
 ];
 

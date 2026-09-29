@@ -1,65 +1,27 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { createHash } from "crypto";
 import { redirect } from "next/navigation";
 
+import {
+  clearSessionCookie,
+  getCurrentUser as getGuardUser,
+  getCurrentUserOrRedirect as getGuardUserOrRedirect,
+  setSignedSessionCookie,
+  type UserRole,
+} from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 
-const DEMO_ACCOUNTS = {
-  ADMIN: {
-    email: "admin@play.local",
-    password: "admin123",
-    name: "مدير النظام",
-    role: "ADMIN",
-  },
-  CASHIER: {
-    email: "cashier@play.local",
-    password: "cashier123",
-    name: "الكاشير",
-    role: "CASHIER",
-  },
-  STAFF: {
-    email: "staff@play.local",
-    password: "staff123",
-    name: "موظف الصالة",
-    role: "STAFF",
-  },
-} as const;
-
-export type UserRole = "ADMIN" | "CASHIER" | "STAFF" | "CUSTOMER";
-
 export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const value = cookieStore.get("play_session")?.value;
-
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(value) as {
-      email?: string;
-      phone?: string;
-      name: string;
-      role: UserRole;
-    };
-  } catch {
-    return null;
-  }
+  return await getGuardUser();
 }
 
 export async function getCurrentUserOrRedirect() {
-  const user = await getCurrentUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  return user;
+  return await getGuardUserOrRedirect();
 }
 
 export async function requireRole(allowedRoles: UserRole[]) {
-  const user = await getCurrentUserOrRedirect();
+  const user = await getGuardUserOrRedirect();
 
   if (!allowedRoles.includes(user.role)) {
     redirect("/");
@@ -68,68 +30,82 @@ export async function requireRole(allowedRoles: UserRole[]) {
   return user;
 }
 
-export async function setSessionCookie(payload: { email?: string; phone?: string; name: string; role: UserRole }) {
-  const cookieStore = await cookies();
-  cookieStore.set("play_session", JSON.stringify(payload), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 8,
-  });
+function hashPassword(password: string): string {
+  return createHash("sha256").update(password.trim()).digest("hex");
 }
+
+const DEMO_ACCOUNTS = {
+  ADMIN: {
+    email: "admin@play.local",
+    passwordHash: hashPassword("admin123"),
+    name: "مدير النظام",
+    role: "ADMIN" as UserRole,
+  },
+  CASHIER: {
+    email: "cashier@play.local",
+    passwordHash: hashPassword("cashier123"),
+    name: "الكاشير",
+    role: "CASHIER" as UserRole,
+  },
+  STAFF: {
+    email: "staff@play.local",
+    passwordHash: hashPassword("staff123"),
+    name: "موظف الصالة",
+    role: "STAFF" as UserRole,
+  },
+};
 
 export async function signIn(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "").trim();
-  const requestedRole = String(formData.get("role") ?? "ADMIN").toUpperCase();
+  const requestedRole = String(formData.get("role") ?? "ADMIN").toUpperCase() as UserRole;
 
-  const user = (await (prisma as any).user.findUnique({ where: { email } })) as
-    | {
-        email: string;
-        name: string | null;
-        role?: UserRole;
-        password?: string | null;
-      }
-    | null;
-
-  if (user && user.role === requestedRole && user.password === password) {
-    await setSessionCookie({
-      email: user.email,
-      name: user.name ?? user.email,
-      role: user.role ?? "STAFF",
-    });
-
-    if (user.role === "ADMIN") {
-      redirect("/admin");
-    }
-
-    redirect("/staff");
+  if (!email || !password) {
+    throw new Error("البريد الإلكتروني وكلمة المرور مطلوبان.");
   }
 
-  const account = Object.values(DEMO_ACCOUNTS).find(
-    (item) => item.email === email && item.password === password && item.role === requestedRole,
+  const inputHash = hashPassword(password);
+
+  const dbUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (dbUser) {
+    const isMatched =
+      dbUser.password === inputHash || dbUser.password === password;
+
+    if (isMatched && dbUser.role === requestedRole) {
+      await setSignedSessionCookie({
+        userId: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name ?? dbUser.email,
+        role: dbUser.role as UserRole,
+      });
+
+      if (dbUser.role === "ADMIN") redirect("/admin");
+      redirect("/staff");
+    }
+  }
+
+  const demoAccount = Object.values(DEMO_ACCOUNTS).find(
+    (acc) =>
+      acc.email === email &&
+      acc.passwordHash === inputHash &&
+      acc.role === requestedRole
   );
 
-  if (!account) {
+  if (!demoAccount) {
     throw new Error("بيانات الدخول غير صحيحة.");
   }
 
-  await setSessionCookie({
-    email: account.email,
-    name: account.name,
-    role: account.role,
+  await setSignedSessionCookie({
+    email: demoAccount.email,
+    name: demoAccount.name,
+    role: demoAccount.role,
   });
 
-  if (account.role === "ADMIN") {
-    redirect("/admin");
-  }
-
-  if (account.role === "CASHIER" || account.role === "STAFF") {
-    redirect("/staff");
-  }
-
-  redirect("/customer");
+  if (demoAccount.role === "ADMIN") redirect("/admin");
+  redirect("/staff");
 }
 
 export async function signInCustomer(formData: FormData) {
@@ -137,21 +113,19 @@ export async function signInCustomer(formData: FormData) {
   const phone = String(formData.get("phone") ?? "").trim();
 
   if (!name || !phone) {
-    throw new Error("الاسم ورقم الهاتف مطلوبان");
+    throw new Error("الاسم ورقم الهاتف مطلوبان.");
   }
 
-  const customer = (await (prisma as any).customer.findUnique({ where: { phone } })) as
-    | {
-        phone: string;
-        name: string | null;
-      }
-    | null;
+  const customer = await prisma.customer.findUnique({
+    where: { phone },
+  });
 
   if (!customer || (customer.name ?? "").trim() !== name) {
     throw new Error("بيانات العميل غير موجودة. الرجاء إنشاء حساب جديد أولاً.");
   }
 
-  await setSessionCookie({
+  await setSignedSessionCookie({
+    userId: customer.id,
     phone: customer.phone,
     name: customer.name ?? customer.phone,
     role: "CUSTOMER",
@@ -165,10 +139,10 @@ export async function createCustomerAccount(formData: FormData) {
   const phone = String(formData.get("phone") ?? "").trim();
 
   if (!name || !phone) {
-    throw new Error("الاسم ورقم الهاتف مطلوبان");
+    throw new Error("الاسم ورقم الهاتف مطلوبان.");
   }
 
-  const customer = (await (prisma as any).customer.upsert({
+  const customer = await prisma.customer.upsert({
     where: { phone },
     update: { name },
     create: {
@@ -177,12 +151,10 @@ export async function createCustomerAccount(formData: FormData) {
       loyaltyPts: 0,
       debt: 0,
     },
-  })) as {
-    phone: string;
-    name: string | null;
-  };
+  });
 
-  await setSessionCookie({
+  await setSignedSessionCookie({
+    userId: customer.id,
     phone: customer.phone,
     name: customer.name ?? customer.phone,
     role: "CUSTOMER",
@@ -192,7 +164,6 @@ export async function createCustomerAccount(formData: FormData) {
 }
 
 export async function signOut() {
-  const cookieStore = await cookies();
-  cookieStore.delete("play_session");
+  await clearSessionCookie();
   redirect("/login");
 }

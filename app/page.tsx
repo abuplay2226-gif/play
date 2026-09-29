@@ -1,44 +1,21 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 
-import { getCurrentUser } from "@/app/actions/auth";
+import { getCurrentUser, signOut } from "@/app/actions/auth";
 import { createCustomerBooking } from "@/app/actions/customer-bookings";
-
-const services = [
-  { title: "جلسات PS5", text: "أجهزة حديثة + شاشات 4K + تجربة لعب سريعة", price: "من 45 ج.م / ساعة" },
-  { title: "غرف VIP", text: "أماكن مخصصة مع أجواء هادئة ومريحة", price: "من 90 ج.م / ساعة" },
-  { title: "قهوه & شاي", text: "مقليات ودراسات ومشروبات مميزة", price: "من 18 ج.م" },
-  { title: "باقات العائلة", text: "عروض مناسبة للمجموعات والأصدقاء", price: "من 180 ج.م" },
-];
-
-const packages = [
-  { name: "باقة البداية", price: "180", feature: "جلسة واحدة + مشروب", highlight: false },
-  { name: "باقة النخبة", price: "320", feature: "جلسات مزدوجة + كيك", highlight: true },
-  { name: "باقة VIP", price: "560", feature: "غرفة خاصة + خدمة مميزة", highlight: false },
-];
-
-const reviews = [
-  { name: "سارة م.", text: "أجواء ممتازة، الخدمة رائعة، والراحة والدعم من أفضل ما رأيته." },
-  { name: "عبدالله ر.", text: "الجلسات ممتازة والموظفين محترفين جدًا، أنصح الجميع." },
-  { name: "نور ا.", text: "الديكور فخم، الطعام لذيذ، والحجز سريع وسهل." },
-];
+import { getLandingPageContent } from "@/app/actions/site-content";
 
 export default async function Home() {
   const user = await getCurrentUser();
+  const { services, packages, reviews } = await getLandingPageContent();
+  const formatCurrency = (value: number) => `${new Intl.NumberFormat("ar-EG").format(value)} ج.م`;
 
-  if (user) {
-    if (user.role === "ADMIN") {
-      redirect("/admin");
-    }
-
-    if (user.role === "CASHIER" || user.role === "STAFF") {
-      redirect("/staff");
-    }
-
-    if (user.role === "CUSTOMER") {
-      redirect("/customer");
-    }
-  }
+  // رابط التوجيه الخاص بحساب المستخدم حسب رتبته
+  const dashboardHref =
+    user?.role === "ADMIN"
+      ? "/admin"
+      : user?.role === "CASHIER" || user?.role === "STAFF"
+      ? "/staff"
+      : "/customer";
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#050816] text-white">
@@ -62,16 +39,43 @@ export default async function Home() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link href="/login" className="rounded-full border border-white/15 px-4 py-2 text-sm font-bold text-white transition hover:border-amber-400 hover:text-amber-300">
-              تسجيل الدخول
-            </Link>
-            <Link href="#booking" className="rounded-full bg-gradient-to-r from-amber-300 to-orange-500 px-5 py-2.5 text-sm font-black text-slate-950 shadow-lg shadow-orange-500/30 transition hover:scale-[1.02]">
+            {user ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  href={dashboardHref}
+                  className="rounded-full bg-slate-800 border border-slate-700 px-4 py-2 text-sm font-bold text-amber-300 transition hover:bg-slate-700"
+                >
+                  لوحة التحكم ({user.name})
+                </Link>
+                <form action={signOut}>
+                  <button
+                    type="submit"
+                    className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-bold text-red-300 transition hover:bg-red-500/20"
+                  >
+                    خروج
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="rounded-full border border-white/15 px-4 py-2 text-sm font-bold text-white transition hover:border-amber-400 hover:text-amber-300"
+              >
+                تسجيل الدخول
+              </Link>
+            )}
+
+            <Link
+              href="#booking"
+              className="rounded-full bg-gradient-to-r from-amber-300 to-orange-500 px-5 py-2.5 text-sm font-black text-slate-950 shadow-lg shadow-orange-500/30 transition hover:scale-[1.02]"
+            >
               احجز الآن
             </Link>
           </div>
         </nav>
       </header>
 
+      {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.18),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.14),_transparent_25%)]" />
         <div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-20 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:px-8 lg:py-24">
@@ -157,6 +161,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Services */}
       <section id="services" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="mb-12 text-center">
           <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">الخدمات</p>
@@ -165,18 +170,19 @@ export default async function Home() {
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           {services.map((service) => (
-            <article key={service.title} className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-xl shadow-slate-950/30">
+            <article key={service.id} className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-xl shadow-slate-950/30">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-500 text-xl font-black text-slate-950">
-                {service.title[0]}
+                {service.icon ?? service.title[0]}
               </div>
               <h3 className="text-xl font-black text-white">{service.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-300">{service.text}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-300">{service.description}</p>
               <div className="mt-5 border-t border-white/10 pt-4 text-sm font-bold text-amber-300">{service.price}</div>
             </article>
           ))}
         </div>
       </section>
 
+      {/* Packages */}
       <section id="packages" className="bg-slate-950/80 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 text-center">
@@ -186,10 +192,10 @@ export default async function Home() {
 
           <div className="grid gap-6 lg:grid-cols-3">
             {packages.map((item) => (
-              <div key={item.name} className={`rounded-[30px] border p-7 ${item.highlight ? "border-amber-400/50 bg-gradient-to-br from-amber-500/10 to-slate-900 shadow-lg shadow-amber-500/15" : "border-white/10 bg-slate-900/80"}`}>
+              <div key={item.id} className={`rounded-[30px] border p-7 ${item.highlight ? "border-amber-400/50 bg-gradient-to-br from-amber-500/10 to-slate-900 shadow-lg shadow-amber-500/15" : "border-white/10 bg-slate-900/80"}`}>
                 <p className="text-sm uppercase tracking-[0.25em] text-slate-400">{item.name}</p>
                 <div className="mt-5 flex items-end gap-2">
-                  <span className="text-5xl font-black text-white">{item.price}</span>
+                  <span className="text-5xl font-black text-white">{new Intl.NumberFormat("ar-EG").format(item.price)}</span>
                   <span className="pb-2 text-sm text-slate-400">ج.م</span>
                 </div>
                 <p className="mt-5 text-slate-300">{item.feature}</p>
@@ -207,6 +213,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Booking Section */}
       <section id="booking" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="grid gap-10 rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 p-6 lg:grid-cols-[0.9fr_1.1fr] lg:p-8">
           <div>
@@ -230,11 +237,11 @@ export default async function Home() {
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="name" className="mb-2 block text-sm text-slate-300">اسم العميل</label>
-                <input id="name" name="name" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="أدخل اسمك" required />
+                <input id="name" name="name" defaultValue={user?.name ?? ""} className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="أدخل اسمك" required />
               </div>
               <div>
                 <label htmlFor="phone" className="mb-2 block text-sm text-slate-300">رقم الهاتف</label>
-                <input id="phone" name="phone" className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="05XXXXXXXX" required />
+                <input id="phone" name="phone" defaultValue={user?.phone ?? ""} className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-amber-400" placeholder="05XXXXXXXX" required />
               </div>
             </div>
 
@@ -268,6 +275,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Reviews */}
       <section id="reviews" className="bg-slate-950/80 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 text-center">
@@ -291,6 +299,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* CTA Footer */}
       <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="rounded-[32px] border border-amber-400/30 bg-gradient-to-r from-amber-500/10 to-sky-500/10 p-8 text-center">
           <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">تجربة استثنائية</p>
@@ -301,6 +310,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Footer */}
       <footer className="border-t border-white/10 bg-[#030712]">
         <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-10 text-sm text-slate-300 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div>

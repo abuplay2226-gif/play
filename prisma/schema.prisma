@@ -8,6 +8,10 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// -------------------------------------------------------------
+// 1. القوائم المحددة (Enums)
+// -------------------------------------------------------------
+
 enum Role {
   ADMIN
   CASHIER
@@ -49,6 +53,8 @@ enum PaymentMethod {
   CASH
   CARD
   WALLET
+  DEBT
+  MIXED
 }
 
 enum ShiftStatus {
@@ -63,14 +69,19 @@ enum BookingStatus {
   NO_SHOW
 }
 
+// -------------------------------------------------------------
+// 2. إدارة المستخدمين والورديات والخزائن المالية
+// -------------------------------------------------------------
+
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String?
-  name      String
-  role      Role     @default(CASHIER)
-  createdAt DateTime @default(now())
-  shifts    Shift[]
+  id            String         @id @default(uuid())
+  email         String         @unique
+  password      String?
+  name          String
+  role          Role           @default(CASHIER)
+  createdAt     DateTime       @default(now())
+  shifts        Shift[]
+  notifications Notification[]
 }
 
 model CashDrawer {
@@ -82,21 +93,41 @@ model CashDrawer {
 }
 
 model Shift {
-  id              String                 @id @default(uuid())
-  userId          String
-  cashDrawerId    String
-  user            User                   @relation(fields: [userId], references: [id])
-  cashDrawer      CashDrawer             @relation(fields: [cashDrawerId], references: [id])
-  openingBalance  Float
-  closingBalance  Float?
-  actualCash      Float?
-  status          ShiftStatus            @default(OPEN)
-  openedAt        DateTime               @default(now())
-  closedAt        DateTime?
-  sessions        DeviceSession[]
-  orders          Order[]
-  transactions    FinancialTransaction[]
+  id             String                 @id @default(uuid())
+  userId         String
+  cashDrawerId   String
+  user           User                   @relation(fields: [userId], references: [id])
+  cashDrawer     CashDrawer             @relation(fields: [cashDrawerId], references: [id])
+  openingBalance Float
+  closingBalance Float?
+  actualCash     Float?
+  status         ShiftStatus            @default(OPEN)
+  openedAt       DateTime               @default(now())
+  closedAt       DateTime?
+  sessions       DeviceSession[]
+  orders         Order[]
+  transactions   FinancialTransaction[]
 }
+
+model FinancialTransaction {
+  id               String      @id @default(uuid())
+  cashDrawerId     String
+  shiftId          String?
+  cashDrawer       CashDrawer  @relation(fields: [cashDrawerId], references: [id])
+  shift            Shift?      @relation(fields: [shiftId], references: [id])
+  customerId       String?
+  supplierId       String?
+  counterpartyType String?
+  counterpartyName String?
+  type             String
+  amount           Float
+  description      String
+  createdAt        DateTime    @default(now())
+}
+
+// -------------------------------------------------------------
+// 3. إدارة الأجهزة وجلسات اللعب والعدادات
+// -------------------------------------------------------------
 
 model Device {
   id               String          @id @default(uuid())
@@ -110,34 +141,39 @@ model Device {
 }
 
 model DeviceSession {
-  id            String        @id @default(uuid())
-  deviceId      String
-  shiftId       String
-  customerId    String?
-  device        Device        @relation(fields: [deviceId], references: [id])
-  shift         Shift         @relation(fields: [shiftId], references: [id])
-  customer      Customer?     @relation(fields: [customerId], references: [id])
-  startTime     DateTime      @default(now())
-  endTime       DateTime?
-  status        SessionStatus @default(ACTIVE)
-  timeCost      Float         @default(0.0)
-  totalCost     Float         @default(0.0)
-  isFixedTime   Boolean       @default(false)
-  fixedDuration Int?
-  slots         TimeSlot[]
-  orders        Order[]
+  id             String        @id @default(uuid())
+  deviceId       String
+  shiftId        String
+  customerId     String?
+  device         Device        @relation(fields: [deviceId], references: [id])
+  shift          Shift         @relation(fields: [shiftId], references: [id])
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  startTime      DateTime      @default(now())
+  endTime        DateTime?
+  status         SessionStatus @default(ACTIVE)
+  timeCost       Float         @default(0.0)
+  totalCost      Float         @default(0.0)
+  isFixedTime    Boolean       @default(false)
+  fixedDuration  Int?
+  plannedMinutes Int?          // مدة الجلسة بالدقائق للعداد التنازلي
+  slots          TimeSlot[]
+  orders         Order[]
 }
 
 model TimeSlot {
-  id        String        @id @default(uuid())
-  sessionId String
-  session   DeviceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  type      SlotType      @default(SINGLE)
+  id         String        @id @default(uuid())
+  sessionId  String
+  session    DeviceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type       SlotType      @default(SINGLE)
   hourlyRate Float
-  startTime DateTime      @default(now())
-  endTime   DateTime?
-  totalCost Float         @default(0.0)
+  startTime  DateTime      @default(now())
+  endTime    DateTime?
+  totalCost  Float         @default(0.0)
 }
+
+// -------------------------------------------------------------
+// 4. المخزون، المنتجات، المواد الخام، وشجرة الوصفات (BOM)
+// -------------------------------------------------------------
 
 model Category {
   id       String    @id @default(uuid())
@@ -146,18 +182,36 @@ model Category {
 }
 
 model Product {
-  id            String          @id @default(uuid())
-  categoryId    String
-  category      Category        @relation(fields: [categoryId], references: [id])
-  name          String
-  barcode       String?         @unique
-  sellPrice     Float
-  costPrice     Float           @default(0.0)
-  stockQuantity Int             @default(0)
-  minStockAlert Int             @default(5)
-  orderItems    OrderItem[]
-  purchaseItems PurchaseItem[]
+  id              String         @id @default(uuid())
+  categoryId      String
+  category        Category       @relation(fields: [categoryId], references: [id])
+  name            String
+  barcode         String?        @unique
+  sellPrice       Float
+  costPrice       Float          @default(0.0)
+  stockQuantity   Float          @default(0.0) // Float لدعم الكسور بالجرام أو الكيلو
+  minStockAlert   Float          @default(5.0)
+  isRawMaterial   Boolean        @default(false) // هل هي مادة خام أم منتج للبيع
+  unit            String         @default("قطعة") // جرام، ملي، قطعة، كيلو
+  orderItems      OrderItem[]
+  purchaseItems   PurchaseItem[]
+  recipeItems     RecipeItem[]   @relation("RecipeProduct")
+  ingredientItems RecipeItem[]   @relation("RecipeIngredient")
 }
+
+model RecipeItem {
+  id           String  @id @default(uuid())
+  productId    String
+  ingredientId String
+  quantity     Float   @default(1.0) // الكمية المستهلكة لكل فنجان/كوب
+
+  product    Product @relation("RecipeProduct", fields: [productId], references: [id], onDelete: Cascade)
+  ingredient Product @relation("RecipeIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 5. نقاط البيع والطلبات (POS)
+// -------------------------------------------------------------
 
 model Order {
   id            String         @id @default(uuid())
@@ -173,21 +227,25 @@ model Order {
 }
 
 model OrderItem {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   orderId   String
   productId String
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product   Product  @relation(fields: [productId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
   quantity  Int
   unitPrice Float
   subTotal  Float
 }
 
+// -------------------------------------------------------------
+// 6. الموردون وفواتير الشراء
+// -------------------------------------------------------------
+
 model Supplier {
   id        String            @id @default(uuid())
   name      String
   phone     String?
-  balance   Float             @default(0.0)
+  balance   Float             @default(0.0) // رصيد المورد (له دائن أو عليه مدين)
   purchases PurchaseInvoice[]
 }
 
@@ -203,44 +261,90 @@ model PurchaseInvoice {
 
 model PurchaseItem {
   id        String          @id @default(uuid())
-  invoiceId  String
+  invoiceId String
   productId String
   invoice   PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product   Product         @relation(fields: [productId], references: [id])
-  quantity  Int
+  quantity  Float           // Float لدعم شراء خامات بالوزن أو الحجم
   unitCost  Float
 }
 
-model FinancialTransaction {
-  id           String        @id @default(uuid())
-  cashDrawerId String
-  shiftId      String?
-  cashDrawer   CashDrawer    @relation(fields: [cashDrawerId], references: [id])
-  shift        Shift?        @relation(fields: [shiftId], references: [id])
-  type         String
-  amount       Float
-  description  String
-  createdAt    DateTime      @default(now())
-}
+// -------------------------------------------------------------
+// 7. إدارة العملاء والحجوزات والإشعارات
+// -------------------------------------------------------------
 
 model Customer {
-  id       String          @id @default(uuid())
-  name     String
-  phone    String          @unique
-  loyaltyPts Int           @default(0)
-  debt     Float           @default(0.0)
-  sessions DeviceSession[]
-  bookings Booking[]
+  id            String          @id @default(uuid())
+  name          String
+  phone         String          @unique
+  loyaltyPts    Int             @default(0)
+  debt          Float           @default(0.0)
+  sessions      DeviceSession[]
+  bookings      Booking[]
+  notifications Notification[]
+}
+
+model Notification {
+  id         String    @id @default(uuid())
+  title      String
+  message    String
+  type       String    @default("INFO")
+  customerId String?
+  userId     String?
+  bookingId  String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id])
+  user     User?     @relation(fields: [userId], references: [id])
+  booking  Booking?  @relation(fields: [bookingId], references: [id])
 }
 
 model Booking {
-  id         String        @id @default(uuid())
-  deviceId   String
-  customerId String
-  device     Device        @relation(fields: [deviceId], references: [id])
-  customer   Customer      @relation(fields: [customerId], references: [id])
-  startTime  DateTime
-  endTime    DateTime
-  status     BookingStatus @default(PENDING)
-  notes      String?
+  id            String         @id @default(uuid())
+  deviceId      String
+  customerId    String
+  device        Device         @relation(fields: [deviceId], references: [id])
+  customer      Customer       @relation(fields: [customerId], references: [id])
+  startTime     DateTime
+  endTime       DateTime
+  status        BookingStatus  @default(PENDING)
+  notes         String?
+  notifications Notification[]
+}
+
+// -------------------------------------------------------------
+// 8. العروض والباقات وتقييمات العملاء
+// -------------------------------------------------------------
+
+model ServiceOffer {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  price       String
+  icon        String?
+  order       Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model PackagePlan {
+  id        String   @id @default(uuid())
+  name      String
+  price     Int
+  feature   String
+  highlight Boolean  @default(false)
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model CustomerReview {
+  id        String   @id @default(uuid())
+  name      String
+  text      String
+  rating    Int      @default(5)
+  active    Boolean  @default(true)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
 }

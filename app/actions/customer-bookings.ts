@@ -1,29 +1,37 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
 
 export type CustomerBookingRow = {
   id: string;
   status: "PENDING" | "CONFIRMED" | "CANCELLED" | "NO_SHOW";
-  startTime: Date | string;
+  startTime: Date;
   device: {
     name: string;
   };
 };
 
-export async function getCustomerBookings(): Promise<CustomerBookingRow[]> {
-  const rows = (await (prisma as any).booking.findMany({
+export async function getCustomerBookings(phone?: string): Promise<CustomerBookingRow[]> {
+  const bookings = await prisma.booking.findMany({
+    where: phone ? { customer: { phone } } : undefined,
     orderBy: { startTime: "asc" },
     include: {
       device: true,
       customer: true,
     },
-  })) as CustomerBookingRow[];
+  });
 
-  return rows;
+  return bookings.map((b) => ({
+    id: b.id,
+    status: b.status as CustomerBookingRow["status"],
+    startTime: b.startTime,
+    device: {
+      name: b.device.name,
+    },
+  }));
 }
 
 export async function createCustomerBooking(formData: FormData): Promise<void> {
@@ -47,7 +55,7 @@ export async function createCustomerBooking(formData: FormData): Promise<void> {
 
   const deviceType = deviceTypeMap[serviceType] ?? "PS5";
 
-  const existingCustomer = await prisma.customer.upsert({
+  const customer = await prisma.customer.upsert({
     where: { phone },
     update: { name },
     create: {
@@ -67,17 +75,17 @@ export async function createCustomerBooking(formData: FormData): Promise<void> {
   });
 
   if (!device) {
-    throw new Error("لا توجد أجهزة متاحة حاليا لنوع الخدمة المختار");
+    throw new Error("لا توجد أجهزة متوفرة حالياً لهذا النوع من الخدمة");
   }
 
   await prisma.booking.create({
     data: {
-      customerId: existingCustomer.id,
+      customerId: customer.id,
       deviceId: device.id,
       startTime: startDate,
       endTime: endDate,
       status: "PENDING",
-      notes: notes || `حجز عميل ${serviceType}`,
+      notes: notes || `حجز عبر البوابة الإلكترونية: ${serviceType}`,
     },
   });
 
