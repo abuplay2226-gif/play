@@ -2,18 +2,18 @@ import { getCurrentUser, signOut } from "@/app/actions/auth";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+// مصفوفة الروابط كاملة ومعرفة مرة واحدة فقط
 const navItems = [
   { label: "لوحة التحكم", href: "/" },
   { label: "الأجهزة", href: "/devices" },
-  { label: "العملاء", href: "/customers" },
-  { label: "الخزائن", href: "/cash-drawers" },
-  { label: "الحسابات", href: "/financial" },
+  { label: "البطولات 🏆", href: "/tournaments" },
   { label: "الورديات", href: "/shifts" },
   { label: "نقاط البيع", href: "/pos" },
   { label: "الحجوزات", href: "/bookings" },
   { label: "المخزون", href: "/inventory" },
   { label: "الموردون", href: "/suppliers" },
   { label: "الموظفون", href: "/users" },
+  { label: "الحسابات المالية", href: "/financial" },
   { label: "التقارير", href: "/reports" },
   { label: "الفاتورة", href: "/receipt" },
 ];
@@ -41,16 +41,12 @@ export async function SiteShell({
             </div>
           </div>
 
-          <nav className="space-y-2">
+          <nav className="space-y-1.5">
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`block rounded-2xl border px-4 py-3 text-sm font-bold transition ${
-                  item.href === "/"
-                    ? "border-sky-500/40 bg-sky-500/10 text-sky-200"
-                    : "border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:text-white"
-                }`}
+                className="block rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-2.5 text-xs font-bold text-slate-300 transition hover:border-slate-700 hover:text-white"
               >
                 {item.label}
               </Link>
@@ -84,7 +80,10 @@ export async function SiteShell({
                   {new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date())}
                 </div>
                 <form action={signOut}>
-                  <button type="submit" className="rounded-full bg-slate-800 px-4 py-2 text-sm font-bold text-slate-200 transition hover:bg-slate-700">
+                  <button
+                    type="submit"
+                    className="rounded-full bg-slate-800 px-4 py-2 text-sm font-bold text-slate-200 transition hover:bg-slate-700"
+                  >
                     تسجيل الخروج
                   </button>
                 </form>

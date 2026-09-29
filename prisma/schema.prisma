@@ -69,6 +69,36 @@ enum BookingStatus {
   NO_SHOW
 }
 
+// Enums خاصة بنظام البطولات
+enum TournamentType {
+  LEAGUE     // دوري كامل أو مجموعات + تصفيات
+  KNOCKOUT   // كأس خروج مغلوب مباشر
+  SUPER_CUP  // سوبر (فريقين نهائي مباشر أو 4 فرق)
+}
+
+enum TournamentStatus {
+  REGISTRATION // التسجيل مفتوح
+  ONGOING      // جارية حالياً
+  COMPLETED    // منتهية
+  CANCELLED    // ملغية
+}
+
+enum MatchStage {
+  GROUP
+  ROUND_OF_16
+  QUARTER_FINAL
+  SEMI_FINAL
+  THIRD_PLACE
+  FINAL
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  WALKOVER
+}
+
 // -------------------------------------------------------------
 // 2. إدارة المستخدمين والورديات والخزائن المالية
 // -------------------------------------------------------------
@@ -155,7 +185,7 @@ model DeviceSession {
   totalCost      Float         @default(0.0)
   isFixedTime    Boolean       @default(false)
   fixedDuration  Int?
-  plannedMinutes Int?          // مدة الجلسة بالدقائق للعداد التنازلي
+  plannedMinutes Int?
   slots          TimeSlot[]
   orders         Order[]
 }
@@ -189,10 +219,10 @@ model Product {
   barcode         String?        @unique
   sellPrice       Float
   costPrice       Float          @default(0.0)
-  stockQuantity   Float          @default(0.0) // Float لدعم الكسور بالجرام أو الكيلو
+  stockQuantity   Float          @default(0.0)
   minStockAlert   Float          @default(5.0)
-  isRawMaterial   Boolean        @default(false) // هل هي مادة خام أم منتج للبيع
-  unit            String         @default("قطعة") // جرام، ملي، قطعة، كيلو
+  isRawMaterial   Boolean        @default(false)
+  unit            String         @default("قطعة")
   orderItems      OrderItem[]
   purchaseItems   PurchaseItem[]
   recipeItems     RecipeItem[]   @relation("RecipeProduct")
@@ -203,7 +233,7 @@ model RecipeItem {
   id           String  @id @default(uuid())
   productId    String
   ingredientId String
-  quantity     Float   @default(1.0) // الكمية المستهلكة لكل فنجان/كوب
+  quantity     Float   @default(1.0)
 
   product    Product @relation("RecipeProduct", fields: [productId], references: [id], onDelete: Cascade)
   ingredient Product @relation("RecipeIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
@@ -245,7 +275,7 @@ model Supplier {
   id        String            @id @default(uuid())
   name      String
   phone     String?
-  balance   Float             @default(0.0) // رصيد المورد (له دائن أو عليه مدين)
+  balance   Float             @default(0.0)
   purchases PurchaseInvoice[]
 }
 
@@ -265,7 +295,7 @@ model PurchaseItem {
   productId String
   invoice   PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product   Product         @relation(fields: [productId], references: [id])
-  quantity  Float           // Float لدعم شراء خامات بالوزن أو الحجم
+  quantity  Float
   unitCost  Float
 }
 
@@ -274,14 +304,15 @@ model PurchaseItem {
 // -------------------------------------------------------------
 
 model Customer {
-  id            String          @id @default(uuid())
-  name          String
-  phone         String          @unique
-  loyaltyPts    Int             @default(0)
-  debt          Float           @default(0.0)
-  sessions      DeviceSession[]
-  bookings      Booking[]
-  notifications Notification[]
+  id                      String                  @id @default(uuid())
+  name                    String
+  phone                   String                  @unique
+  loyaltyPts              Int                     @default(0)
+  debt                    Float                   @default(0.0)
+  sessions                DeviceSession[]
+  bookings                Booking[]
+  notifications           Notification[]
+  tournamentParticipations TournamentParticipant[]
 }
 
 model Notification {
@@ -347,4 +378,89 @@ model CustomerReview {
   active    Boolean  @default(true)
   order     Int      @default(0)
   createdAt DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// 9. نظام إدارة البطولات (Tournaments & eSports Engine)
+// -------------------------------------------------------------
+
+model Tournament {
+  id                  String                  @id @default(uuid())
+  title               String                  // اسم البطولة (مثلاً: دوري الأبطال FC 26)
+  gameName            String                  // اسم اللعبة (FC 26, PES 21, Tekken...)
+  type                TournamentType          // دوري LEAGUE، كأس KNOCKOUT، سوبر SUPER_CUP
+  status              TournamentStatus        @default(REGISTRATION)
+  entryFee            Float                   @default(0.0) // رسوم الاشتراك لكل لاعب
+  prizePool           Float                   @default(0.0) // مجموع الجوائز المالية
+  groupCount          Int                     @default(1)   // عدد المجموعات
+  qualifiersPerGroup  Int                     @default(2)   // كم متأهل من كل مجموعة
+  startDate           DateTime                @default(now())
+  endDate             DateTime?
+  groups              TournamentGroup[]
+  participants        TournamentParticipant[]
+  matches             TournamentMatch[]
+  createdAt           DateTime                @default(now())
+}
+
+model TournamentGroup {
+  id           String                  @id @default(uuid())
+  tournamentId String
+  tournament   Tournament              @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  name         String                  // اسم المجموعة (المجموعة A، المجموعة B...)
+  participants TournamentParticipant[]
+  matches      TournamentMatch[]
+}
+
+model TournamentParticipant {
+  id           String           @id @default(uuid())
+  tournamentId String
+  tournament   Tournament       @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer         @relation(fields: [customerId], references: [id])
+  groupId      String?
+  group        TournamentGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  teamName     String?          // اسم الفريق المختار (مثلاً: ريال مدريد، السيتي...)
+
+  // إحصائيات جدول الدوري الحية
+  played       Int              @default(0) // لعب
+  won          Int              @default(0) // فاز
+  drawn        Int              @default(0) // تعادل
+  lost         Int              @default(0) // خسر
+  goalsFor     Int              @default(0) // له (أهداف مسجلة)
+  goalsAgainst Int              @default(0) // عليه (أهداف مستقبلة)
+  goalDiff     Int              @default(0) // فارق الأهداف
+  points       Int              @default(0) // إجمالي النقاط (الفوز = 3، التعادل = 1)
+  isQualified  Boolean          @default(false) // حالة الصعود للتصفيات (مع إمكانية التعديل اليدوي)
+
+  matchesAsPlayer1 TournamentMatch[] @relation("Player1Matches")
+  matchesAsPlayer2 TournamentMatch[] @relation("Player2Matches")
+  matchesWon       TournamentMatch[] @relation("WonMatches")
+  createdAt        DateTime          @default(now())
+}
+
+model TournamentMatch {
+  id           String                  @id @default(uuid())
+  tournamentId String
+  tournament   Tournament              @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  groupId      String?
+  group        TournamentGroup?        @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  stage        MatchStage              @default(GROUP)
+  roundNumber  Int                     @default(1)
+  matchNumber  Int                     @default(1)
+
+  player1Id    String?
+  player1      TournamentParticipant?  @relation("Player1Matches", fields: [player1Id], references: [id], onDelete: SetNull)
+  player2Id    String?
+  player2      TournamentParticipant?  @relation("Player2Matches", fields: [player2Id], references: [id], onDelete: SetNull)
+
+  player1Score Int?
+  player2Score Int?
+  isCompleted  Boolean                 @default(false)
+  status       MatchStatus             @default(SCHEDULED)
+  
+  winnerId     String?
+  winner       TournamentParticipant?  @relation("WonMatches", fields: [winnerId], references: [id], onDelete: SetNull)
+
+  deviceId     String?                 // جهاز البلايستيشن المخصص للمباراة
+  createdAt    DateTime                @default(now())
 }
