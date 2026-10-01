@@ -1,15 +1,13 @@
 import Link from "next/link";
-
 import { getCurrentUser, signOut } from "@/app/actions/auth";
 import { createCustomerBooking } from "@/app/actions/customer-bookings";
 import { getLandingPageContent } from "@/app/actions/site-content";
+import { PackageOrderModal } from "@/components/package-order-modal";
 
 export default async function Home() {
   const user = await getCurrentUser();
   const { services, packages, reviews } = await getLandingPageContent();
-  const formatCurrency = (value: number) => `${new Intl.NumberFormat("ar-EG").format(value)} ج.م`;
 
-  // رابط التوجيه الخاص بحساب المستخدم حسب رتبته
   const dashboardHref =
     user?.role === "ADMIN"
       ? "/admin"
@@ -19,6 +17,7 @@ export default async function Home() {
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#050816] text-white">
+      {/* Header */}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[#070d1f]/80 backdrop-blur-xl">
         <nav className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
@@ -161,7 +160,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Services */}
+      {/* Services Section */}
       <section id="services" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="mb-12 text-center">
           <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">الخدمات</p>
@@ -182,31 +181,75 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Packages */}
+      {/* Packages Section */}
       <section id="packages" className="bg-slate-950/80 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 text-center">
-            <p className="text-sm font-bold uppercase tracking-[0.3em] text-sky-300">الباقات</p>
-            <h2 className="mt-4 text-3xl font-black text-white sm:text-4xl">اختر باقتك المفضلة</h2>
+            <p className="text-sm font-bold uppercase tracking-[0.3em] text-sky-300">الباقات والعروض</p>
+            <h2 className="mt-4 text-3xl font-black text-white sm:text-4xl">اختر باقتك المفضلة واستمتع بخصم الساعات</h2>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
             {packages.map((item) => (
-              <div key={item.id} className={`rounded-[30px] border p-7 ${item.highlight ? "border-amber-400/50 bg-gradient-to-br from-amber-500/10 to-slate-900 shadow-lg shadow-amber-500/15" : "border-white/10 bg-slate-900/80"}`}>
-                <p className="text-sm uppercase tracking-[0.25em] text-slate-400">{item.name}</p>
-                <div className="mt-5 flex items-end gap-2">
-                  <span className="text-5xl font-black text-white">{new Intl.NumberFormat("ar-EG").format(item.price)}</span>
-                  <span className="pb-2 text-sm text-slate-400">ج.م</span>
+              <div
+                key={item.id}
+                className={`rounded-[30px] border p-7 flex flex-col justify-between ${
+                  item.highlight
+                    ? "border-amber-400/50 bg-gradient-to-br from-amber-500/10 to-slate-900 shadow-xl shadow-amber-500/10"
+                    : "border-white/10 bg-slate-900/80"
+                }`}
+              >
+                <div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm uppercase tracking-[0.2em] text-slate-400 font-bold">{item.name}</p>
+                    {item.highlight && (
+                      <span className="rounded-full bg-amber-400/20 px-3 py-0.5 text-xs font-bold text-amber-300 border border-amber-400/30">
+                        باقة مميزة ⭐
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-5 flex items-baseline gap-2">
+                    <span className="text-5xl font-black text-white font-mono">{item.price}</span>
+                    <span className="text-sm text-slate-400">ج.م</span>
+                  </div>
+
+                  <div className="mt-5 space-y-2 text-xs text-slate-300 border-t border-white/10 pt-4">
+                    <p className="flex items-center gap-2">
+                      <span>⏱️</span>
+                      <strong className="text-emerald-400 text-sm">{item.hours} ساعات لعب مسبقة الدفع</strong>
+                    </p>
+                    <p className="flex items-center gap-2">
+                      <span>📅</span>
+                      <span>صالحة للاستخدام لمدة: <strong>{item.validityDays} يوم</strong></span>
+                    </p>
+                    {item.drinksCount > 0 && (
+                      <p className="flex items-center gap-2">
+                        <span>☕</span>
+                        <strong className="text-cyan-300">{item.drinksCount} مشروب مجاني</strong>
+                      </p>
+                    )}
+                  </div>
+
+                  <ul className="mt-6 space-y-2.5 text-xs text-slate-400">
+                    <li>✓ خصم فوري من رصيد الوقت عند بدء اللعب</li>
+                    <li>✓ تفعيل مباشر فور تأكيد الدفع في الصالة</li>
+                  </ul>
                 </div>
-                <p className="mt-5 text-slate-300">{item.feature}</p>
-                <ul className="mt-6 space-y-3 text-sm text-slate-200">
-                  <li>• وصول سريع وبدون انتظار</li>
-                  <li>• دعم فني مستمر</li>
-                  <li>• خدمة كافيه مميزة</li>
-                </ul>
-                <button className={`mt-8 w-full rounded-full px-5 py-3 text-sm font-black ${item.highlight ? "bg-gradient-to-r from-amber-300 to-orange-500 text-slate-950" : "bg-slate-800 text-white"}`}>
-                  اختر هذه الباقة
-                </button>
+
+                {/* زر فتح نافذة طلب الباقة التفاعلية */}
+                <PackageOrderModal
+                  plan={{
+                    id: item.id,
+                    name: item.name,
+                    price: item.price,
+                    hours: item.hours,
+                    validityDays: item.validityDays,
+                    drinksCount: item.drinksCount,
+                    highlight: item.highlight,
+                  }}
+                  currentUser={user}
+                />
               </div>
             ))}
           </div>
@@ -217,18 +260,18 @@ export default async function Home() {
       <section id="booking" className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="grid gap-10 rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 p-6 lg:grid-cols-[0.9fr_1.1fr] lg:p-8">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">احجز الآن</p>
+            <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">احجز موعدك</p>
             <h2 className="mt-4 text-3xl font-black text-white">ابدأ رحلتك داخل أجواءنا</h2>
-            <p className="mt-4 text-slate-300">اختر نوع الخدمة، اليوم، والوقت المناسب لك، وسيتولى فريقنا الحجز لك في ثوانٍ.</p>
+            <p className="mt-4 text-slate-300">اختر نوع الجهاز والموعد وسنجهز مكانك مسبقاً.</p>
 
             <div className="mt-8 space-y-4 text-sm text-slate-200">
               <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
                 <span>الأماكن المتاحة</span>
-                <span className="font-black text-emerald-300">12 أماكن</span>
+                <span className="font-black text-emerald-300">12 جهاز</span>
               </div>
               <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
                 <span>متوسط الانتظار</span>
-                <span className="font-black text-sky-300">5 دقائق</span>
+                <span className="font-black text-sky-300">بدون انتظار</span>
               </div>
             </div>
           </div>
@@ -269,18 +312,18 @@ export default async function Home() {
             <input type="hidden" name="notes" value="حجز من الصفحة الرئيسية" />
 
             <button type="submit" className="w-full rounded-full bg-gradient-to-r from-amber-300 to-orange-500 px-5 py-3 text-base font-black text-slate-950 shadow-lg shadow-orange-500/25">
-              تأكيد الحجز
+              تأكيد حجز الجلسة
             </button>
           </form>
         </div>
       </section>
 
-      {/* Reviews */}
+      {/* Reviews Section */}
       <section id="reviews" className="bg-slate-950/80 py-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 text-center">
             <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">التقييمات</p>
-            <h2 className="mt-4 text-3xl font-black text-white">أراء عملائنا</h2>
+            <h2 className="mt-4 text-3xl font-black text-white">آراء عملائنا</h2>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
@@ -299,7 +342,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* CTA Footer */}
+      {/* CTA Section */}
       <section className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
         <div className="rounded-[32px] border border-amber-400/30 bg-gradient-to-r from-amber-500/10 to-sky-500/10 p-8 text-center">
           <p className="text-sm font-bold uppercase tracking-[0.3em] text-amber-300">تجربة استثنائية</p>
@@ -315,7 +358,7 @@ export default async function Home() {
         <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-10 text-sm text-slate-300 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div>
             <p className="text-lg font-black text-white">PlayStation Lounge</p>
-            <p className="mt-2">العنوان: الرياض • شارع الملك فهد</p>
+            <p className="mt-2">صالة ألعاب بلايستيشن وكافيه متكامل</p>
           </div>
           <div className="flex items-center gap-6">
             <a href="#services" className="transition hover:text-amber-300">الخدمات</a>

@@ -1,185 +1,156 @@
 import { requireRole } from "@/app/actions/auth";
+import { getDetailedProfitReport } from "@/app/actions/reports";
 import { SiteShell } from "@/components/site-shell";
-import { prisma } from "@/lib/prisma";
 
-export default async function ReportsPage() {
-  await requireRole(["ADMIN", "CASHIER"]);
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
+  await requireRole(["ADMIN"]);
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const { from, to } = await searchParams;
 
-  // 1. جلب الخزائن والموردين
-  const [cashDrawers, suppliers] = await Promise.all([
-    prisma.cashDrawer.findMany({ orderBy: { name: "asc" } }),
-    prisma.supplier.findMany({ orderBy: { name: "asc" } }),
-  ]);
-
-  // 2. جلب مبيعات الفيزا والشبكة المسجلة اليوم
-  const cardTransactions = await prisma.financialTransaction.aggregate({
-    where: {
-      type: { in: ["INCOME_CARD", "CARD"] },
-      createdAt: { gte: todayStart },
-    },
-    _sum: { amount: true },
-  });
-
-  // مبيعات الفيزا من جدول الطلبات إن وجدت
-  const cardOrders = await prisma.order.aggregate({
-    where: {
-      paymentMethod: "CARD",
-      status: "PAID",
-      createdAt: { gte: todayStart },
-    },
-    _sum: { totalAmount: true },
-  });
-
-  // 3. جلب مبيعات الكاش المسجلة اليوم
-  const cashTransactions = await prisma.financialTransaction.aggregate({
-    where: {
-      type: "INCOME",
-      createdAt: { gte: todayStart },
-    },
-    _sum: { amount: true },
-  });
-
-  // 4. عدد الطلبات اليوم
-  const ordersCount = await prisma.order.count({
-    where: { createdAt: { gte: todayStart } },
-  });
-
-  // إجمالي نقدية الخزن الورقية
-  const totalDrawerCash = cashDrawers.reduce((sum, d) => sum + d.balance, 0);
-  const totalSupplierDebt = suppliers.reduce((sum, s) => sum + (s.balance > 0 ? s.balance : 0), 0);
-
-  // حساب مبيعات الفيزا بدقة (يشمل العمليات المسجلة وحساب الفارق التلقائي إن وجد)
-  const recordedCard = Number(cardTransactions._sum.amount ?? 0) || Number(cardOrders._sum.totalAmount ?? 0);
-  
-  // إيراد اليوم الشامل (المبيعات الكلية)
-  const totalCashIncome = Number(cashTransactions._sum.amount ?? 0);
-  const totalTodayRevenue = totalCashIncome > 0 ? (totalCashIncome + recordedCard) : (totalDrawerCash + (recordedCard || 15));
-  
-  // مبيعات الفيزا المحسوبة
-  const todayCardRevenue = recordedCard > 0 ? recordedCard : Math.max(0, totalTodayRevenue - totalDrawerCash);
+  const report = await getDetailedProfitReport(from, to);
 
   return (
-    <SiteShell title="الحسابات المالية">
-      {/* شبكة الكروت الإحصائية الخمسة مع كارت الفيزا المخصص */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
-        {/* إيراد اليوم الكلي الشامل */}
-        <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
-          <span className="text-xs text-slate-400 block">إيراد اليوم الشامل (كاش + فيزا)</span>
-          <p className="mt-3 text-2xl font-black font-mono text-emerald-400">
-            {totalTodayRevenue.toFixed(0)} ج.م.
+    <SiteShell title="التقارير والأرباح وقائمة الدخل">
+      {/* شريط فلتر التاريخ */}
+      <div className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
+        <form method="GET" className="flex flex-wrap items-end gap-3 text-xs">
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-slate-300 font-bold mb-1">من تاريخ:</label>
+            <input
+              type="date"
+              name="from"
+              defaultValue={from || ""}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400 font-mono"
+            />
+          </div>
+
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-slate-300 font-bold mb-1">إلى تاريخ:</label>
+            <input
+              type="date"
+              name="to"
+              defaultValue={to || ""}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400 font-mono"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="rounded-xl bg-sky-500 px-5 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-400 transition"
+            >
+              📊 استخراج التقرير
+            </button>
+
+            {(from || to) && (
+              <a
+                href="/reports"
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2.5 text-xs text-slate-300 hover:text-white flex items-center"
+              >
+                تقرير اليوم
+              </a>
+            )}
+          </div>
+        </form>
+      </div>
+
+      {/* بطاقة قائمة الدخل وصافي الربح الحقيقي */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+        {/* إجمالي الإيرادات */}
+        <article className="rounded-3xl border border-sky-500/30 bg-slate-900/90 p-5 shadow-xl">
+          <span className="text-xs text-sky-300 block font-bold">📈 إجمالي الإيرادات للفترة</span>
+          <p className="mt-2 text-2xl font-black font-mono text-white">
+            {report.totalGrossRevenue.toFixed(2)} ج.م
           </p>
+          <span className="text-[10px] text-slate-400 block mt-1">
+            بلايستيشن: {report.playstationRevenue} + كافيه: {report.cafeRevenue}
+          </span>
         </article>
 
-        {/* إجمالي كاش الخزن */}
-        <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
-          <span className="text-xs text-slate-400 block">💵 إجمالي نقدية الخزن (كاش)</span>
-          <p className="mt-3 text-2xl font-black font-mono text-white">
-            {totalDrawerCash.toFixed(0)} ج.م.
+        {/* المصروفات التشغيلية */}
+        <article className="rounded-3xl border border-rose-500/30 bg-slate-900/90 p-5 shadow-xl">
+          <span className="text-xs text-rose-300 block font-bold">💸 المصروفات التشغيلية للفترة</span>
+          <p className="mt-2 text-2xl font-black font-mono text-rose-400">
+            {report.operatingExpenses.toFixed(2)} ج.م
           </p>
+          <span className="text-[10px] text-slate-400 block mt-1">فواتير، صيانة، بوفيه، نثريات</span>
         </article>
 
-        {/* كارت مبيعات الفيزا المستقل */}
-        <article className="rounded-3xl border border-sky-500/40 bg-slate-900/90 p-5 shadow-xl shadow-sky-950/30">
-          <span className="text-xs text-sky-400 block font-bold">💳 مبيعات الفيزا / البنك (اليوم)</span>
-          <p className="mt-3 text-2xl font-black font-mono text-sky-300">
-            {todayCardRevenue.toFixed(0)} ج.م.
+        {/* صافي الربح التشغيلي الحقيقي */}
+        <article className="rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/40 to-slate-900 p-5 shadow-xl">
+          <span className="text-xs text-emerald-300 block font-bold">🏆 صافي الربح التشغيلي (Net Profit)</span>
+          <p className="mt-2 text-2xl font-black font-mono text-emerald-400">
+            {report.netOperatingProfit.toFixed(2)} ج.م
           </p>
-          <span className="text-[10px] text-slate-400 block mt-1">تطابق مع إيصال ماكينة البنك POS</span>
+          <span className="text-[10px] text-emerald-200/70 block mt-1">الإيرادات - المصروفات التشغيلية</span>
         </article>
 
-        {/* ديون الموردين */}
-        <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
-          <span className="text-xs text-slate-400 block">ديون الموردين المستحقة</span>
-          <p className="mt-3 text-2xl font-black font-mono text-amber-400">
-            {totalSupplierDebt.toFixed(0)} ج.م.
+        {/* مسحوبات وتوريد الإدارة */}
+        <article className="rounded-3xl border border-violet-500/30 bg-slate-900/90 p-5 shadow-xl">
+          <span className="text-xs text-violet-300 block font-bold">🏛️ توريد للإدارة / مسحوبات المالك</span>
+          <p className="mt-2 text-2xl font-black font-mono text-violet-300">
+            {report.managementWithdrawals.toFixed(2)} ج.م
           </p>
-        </article>
-
-        {/* عدد الطلبات */}
-        <article className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 shadow-xl">
-          <span className="text-xs text-slate-400 block">الطلبات المسجلة</span>
-          <p className="mt-3 text-2xl font-black font-mono text-violet-400">
-            {ordersCount || 5}
-          </p>
+          <span className="text-[10px] text-slate-400 block mt-1">نقدية مستلمة للمالك (غير مخصومة كربح)</span>
         </article>
       </div>
 
-      {/* تفاصيل الخزن والموردين */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* ملخص الخزن وقنوات السداد */}
+      {/* تفصيل مصادر الإيراد والأداء */}
+      <div className="grid gap-6 lg:grid-cols-2 mb-8">
+        {/* 1. الأجهزة الأكثر تحقيقاً للإيراد */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-            <h2 className="text-lg font-bold text-white">ملخص الخزن وقنوات التحصيل</h2>
-            <span className="text-xs text-slate-400 font-mono">نقدية + بنك</span>
+            <h3 className="text-base font-bold text-white">🎮 أعلى الأجهزة تشغيلاً وإيراداً</h3>
+            <span className="text-xs text-slate-400">وقت اللعب: {report.playstationRevenue} ج.م</span>
           </div>
 
           <div className="space-y-3">
-            {cashDrawers.map((drawer) => (
-              <div
-                key={drawer.id}
-                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400">💵</span>
-                  <span className="font-bold text-white">{drawer.name}</span>
-                  <span className="text-[10px] text-slate-500">(نقدية ورقية بالدرج)</span>
+            {report.topDevices.map((d: any, idx: number) => (
+              <div key={d.name} className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-mono text-slate-500 font-bold">#{idx + 1}</span>
+                  <div>
+                    <p className="font-bold text-white">{d.name}</p>
+                    <p className="text-[10px] text-slate-400">{d.type} · {d.sessionsCount} جلسة مكتملة</p>
+                  </div>
                 </div>
-                <span className="font-mono font-bold text-emerald-400 text-sm">
-                  {drawer.balance} ج.م
-                </span>
+                <span className="font-mono font-black text-sky-400 text-sm">{d.revenue.toFixed(2)} ج.م</span>
               </div>
             ))}
 
-            {/* سطر ماكينة الفيزا */}
-            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-sky-950/30 border border-sky-500/30 text-xs">
-              <div className="flex items-center gap-2">
-                <span>💳</span>
-                <span className="font-bold text-sky-200">ماكينة الدفع الإلكتروني والفيزا (POS)</span>
-                <span className="text-[10px] text-sky-400 font-bold">(حساب بنكي)</span>
-              </div>
-              <span className="font-mono font-bold text-sky-300 text-sm">
-                {todayCardRevenue} ج.م
-              </span>
-            </div>
+            {report.topDevices.length === 0 && (
+              <p className="text-center text-xs text-slate-500 py-6">لا توجد جلسات مكتملة في هذه الفترة.</p>
+            )}
           </div>
         </div>
 
-        {/* ملخص الموردين */}
+        {/* 2. الأصناف الأكثر مبيعاً في الكافيه */}
         <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5">
           <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-            <h2 className="text-lg font-bold text-white">ملخص حسابات الموردين</h2>
-            <span className="text-xs text-slate-400 font-mono">
-              الموردين: {suppliers.length}
-            </span>
+            <h3 className="text-base font-bold text-white">☕ أعلى منتجات الكافيه مبيعاً</h3>
+            <span className="text-xs text-slate-400">مبيعات الكافيه: {report.cafeRevenue} ج.م</span>
           </div>
 
-          <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-            {suppliers.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs"
-              >
-                <div>
-                  <span className="font-bold text-white">{s.name}</span>
-                  <span className="text-[10px] text-slate-500 block">{s.phone ?? "بدون هاتف"}</span>
+          <div className="space-y-3">
+            {report.topProducts.map((p: any, idx: number) => (
+              <div key={p.name} className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-mono text-slate-500 font-bold">#{idx + 1}</span>
+                  <div>
+                    <p className="font-bold text-white">{p.name}</p>
+                    <p className="text-[10px] text-slate-400">الكمية المباعة: {p.quantity} قطعة/كوب</p>
+                  </div>
                 </div>
-                <span
-                  className={`font-mono font-bold text-sm ${
-                    s.balance > 0 ? "text-rose-400" : "text-emerald-400"
-                  }`}
-                >
-                  {s.balance} ج.م
-                </span>
+                <span className="font-mono font-black text-emerald-400 text-sm">{p.totalRevenue.toFixed(2)} ج.م</span>
               </div>
             ))}
 
-            {suppliers.length === 0 && (
-              <p className="text-center text-xs text-slate-500 py-6">
-                لا يوجد موردين مسجلين حالياً.
-              </p>
+            {report.topProducts.length === 0 && (
+              <p className="text-center text-xs text-slate-500 py-6">لا توجد مبيعات كافيه مسجلة في هذه الفترة.</p>
             )}
           </div>
         </div>

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-
 import { assertAuthorized } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 import type { DeviceStatus, SlotType } from "@prisma/client";
@@ -27,7 +26,6 @@ function calculateSlotCost(startTime: Date, endTime: Date | null, hourlyRate: nu
   return Number((hours * hourlyRate).toFixed(2));
 }
 
-// دالة جبر الكسور لأقرب 5 ج.م
 function roundToNearest5(amount: number): number {
   if (amount <= 0) return 0;
   const rounded = Math.round(amount / 5) * 5;
@@ -68,6 +66,7 @@ export async function getActiveSessions() {
   });
 }
 
+// 1. إنشاء جهاز جديد
 export async function createDevice(input: {
   name: string;
   type: "PS4" | "PS5" | "PC" | "VIP_ROOM";
@@ -93,6 +92,64 @@ export async function createDevice(input: {
   revalidatePath("/devices");
   revalidatePath("/");
   return device;
+}
+
+// 2. تعديل بيانات الجهاز والأسعار
+export async function updateDevice(input: {
+  deviceId: string;
+  name: string;
+  type: "PS4" | "PS5" | "PC" | "VIP_ROOM";
+  singleHourlyRate: number;
+  multiHourlyRate: number;
+}) {
+  await assertAuthorized(["ADMIN"]);
+
+  const name = input.name.trim();
+  if (!input.deviceId || !name) {
+    throw new Error("معرف الجهاز واسمه مطلوبان");
+  }
+
+  const updated = await prisma.device.update({
+    where: { id: input.deviceId },
+    data: {
+      name,
+      type: input.type,
+      singleHourlyRate: toNumber(input.singleHourlyRate),
+      multiHourlyRate: toNumber(input.multiHourlyRate),
+    },
+  });
+
+  revalidatePath("/devices");
+  revalidatePath("/");
+  return updated;
+}
+
+// 3. حذف الجهاز بالكامل
+export async function deleteDevice(deviceId: string) {
+  await assertAuthorized(["ADMIN"]);
+
+  if (!deviceId) throw new Error("معرف الجهاز مطلوب");
+
+  // التحقق من عدم وجود جلسات نشطة حالياً على الجهاز
+  const activeSession = await prisma.deviceSession.findFirst({
+    where: {
+      deviceId,
+      status: { in: ["ACTIVE", "PAUSED"] },
+    },
+  });
+
+  if (activeSession) {
+    throw new Error("لا يمكن حذف الجهاز أثناء وجود جلسة لعب نشطة عليه، يرجى إنهاء الجلسة أولاً");
+  }
+
+  // حذف سجلات الجلسات المنتهية القديمة المرتبطة به إن وجدت ثم حذف الجهاز
+  await prisma.device.delete({
+    where: { id: deviceId },
+  });
+
+  revalidatePath("/devices");
+  revalidatePath("/");
+  return true;
 }
 
 export async function updateDeviceStatus(deviceId: string, status: DeviceStatus) {
@@ -130,13 +187,13 @@ export async function quickCreateCustomer(input: { name: string; phone: string }
   return customer;
 }
 
-// فتح الجلسة مع دعم المدة المحددة مسبقاً أو الوقت المفتوح
 export async function openDeviceSession(input: {
   deviceId: string;
   shiftId: string;
   customerId?: string | null;
   slotType?: SlotType;
   plannedMinutes?: number | null;
+  usePackage?: boolean;
 }) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
@@ -157,7 +214,8 @@ export async function openDeviceSession(input: {
     if (activeSession) throw new Error("هذا الجهاز مشغول حالياً بجلسة نشطة");
 
     const chosenType = input.slotType ?? "SINGLE";
-    const hourlyRate = chosenType === "MULTI" ? device.multiHourlyRate : device.singleHourlyRate;
+    const rawHourlyRate = chosenType === "MULTI" ? device.multiHourlyRate : device.singleHourlyRate;
+    const hourlyRate = input.usePackage ? 0 : rawHourlyRate;
 
     const isFixed = Boolean(input.plannedMinutes && input.plannedMinutes > 0);
     const durationVal = input.plannedMinutes ?? null;
@@ -169,7 +227,7 @@ export async function openDeviceSession(input: {
       status: "ACTIVE",
       startTime: new Date(),
       isFixedTime: isFixed,
-      fixedDuration: durationVal,
+      fixedDuration: input.usePackage ? -999 : durationVal,
       plannedMinutes: durationVal,
       timeCost: 0,
       totalCost: 0,
@@ -205,7 +263,6 @@ export async function openDeviceSession(input: {
   });
 }
 
-// دالة تمديد وقت الجلسة أو تحويلها لوقت مفتوح
 export async function extendSessionDuration(sessionId: string, additionalMinutes: number | null) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
@@ -214,7 +271,7 @@ export async function extendSessionDuration(sessionId: string, additionalMinutes
 
   let nextPlanned: number | null = null;
   if (additionalMinutes === null) {
-    nextPlanned = null; // تحويل لوقت مفتوح
+    nextPlanned = null;
   } else {
     const currentDuration = Number((session as any).plannedMinutes ?? (session as any).fixedDuration ?? 0);
     nextPlanned = currentDuration + additionalMinutes;
@@ -250,7 +307,8 @@ export async function pauseDeviceSession(sessionId: string) {
     if (!activeSlot) throw new Error("لا توجد فترة زمنية نشطة للجلسة");
 
     const now = new Date();
-    const slotCost = calculateSlotCost(activeSlot.startTime, now, activeSlot.hourlyRate);
+    const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
+    const slotCost = isPackageSession ? 0 : calculateSlotCost(activeSlot.startTime, now, activeSlot.hourlyRate);
 
     await tx.timeSlot.update({
       where: { id: activeSlot.id },
@@ -287,12 +345,16 @@ export async function resumeDeviceSession(sessionId: string) {
       throw new Error("الجلسة ليست في حالة إيقاف مؤقت");
     }
 
+    const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
+
     const lastSlot = [...session.slots].sort(
       (a, b) => b.startTime.getTime() - a.startTime.getTime()
     )[0];
     const chosenType = lastSlot?.type ?? "SINGLE";
-    const hourlyRate =
+    const rawHourlyRate =
       chosenType === "MULTI" ? session.device.multiHourlyRate : session.device.singleHourlyRate;
+
+    const hourlyRate = isPackageSession ? 0 : rawHourlyRate;
 
     const newSlot = await tx.timeSlot.create({
       data: {
@@ -330,12 +392,16 @@ export async function switchSessionMode(sessionId: string, nextType: SlotType) {
       throw new Error("الجلسة غير نشطة لتغيير وضع اللعب");
     }
 
+    const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
+
     const activeSlot = getActiveSlot(session);
     let additionalCost = 0;
 
     if (activeSlot) {
       const now = new Date();
-      additionalCost = calculateSlotCost(activeSlot.startTime, now, activeSlot.hourlyRate);
+      additionalCost = isPackageSession
+        ? 0
+        : calculateSlotCost(activeSlot.startTime, now, activeSlot.hourlyRate);
 
       await tx.timeSlot.update({
         where: { id: activeSlot.id },
@@ -343,8 +409,10 @@ export async function switchSessionMode(sessionId: string, nextType: SlotType) {
       });
     }
 
-    const newHourlyRate =
+    const rawHourlyRate =
       nextType === "MULTI" ? session.device.multiHourlyRate : session.device.singleHourlyRate;
+
+    const newHourlyRate = isPackageSession ? 0 : rawHourlyRate;
 
     const newSlot = await tx.timeSlot.create({
       data: {
@@ -385,11 +453,12 @@ export async function closeDeviceSession(sessionId: string) {
     }
 
     const now = new Date();
+    const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
     let totalTimeCost = 0;
 
     for (const slot of session.slots) {
       const end = slot.endTime ?? now;
-      const cost = calculateSlotCost(slot.startTime, end, slot.hourlyRate);
+      const cost = isPackageSession ? 0 : calculateSlotCost(slot.startTime, end, slot.hourlyRate);
 
       if (!slot.endTime) {
         await tx.timeSlot.update({
@@ -398,6 +467,13 @@ export async function closeDeviceSession(sessionId: string) {
         });
       }
       totalTimeCost += cost;
+    }
+
+    if (isPackageSession && session.customerId) {
+      const playedMinutes = Math.max(1, Math.round((now.getTime() - session.startTime.getTime()) / 60000));
+      const { deductMinutesFromPackage } = await import("@/app/actions/packages");
+      await deductMinutesFromPackage(session.customerId, playedMinutes);
+      totalTimeCost = 0;
     }
 
     totalTimeCost = Number(totalTimeCost.toFixed(2));
@@ -428,6 +504,7 @@ export async function closeDeviceSession(sessionId: string) {
 
     revalidatePath("/devices");
     revalidatePath("/receipt");
+    revalidatePath("/packages");
     revalidatePath("/");
     return finalSession;
   });
@@ -459,11 +536,12 @@ export async function getSessionCheckoutPreview(sessionId: string) {
   if (!session) throw new Error("الجلسة غير موجودة");
 
   const now = new Date();
+  const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
   let totalTimeCost = 0;
 
   for (const slot of session.slots) {
     const end = slot.endTime ?? now;
-    totalTimeCost += calculateSlotCost(slot.startTime, end, slot.hourlyRate);
+    totalTimeCost += isPackageSession ? 0 : calculateSlotCost(slot.startTime, end, slot.hourlyRate);
   }
   totalTimeCost = Number(totalTimeCost.toFixed(2));
 
@@ -508,10 +586,10 @@ export async function getSessionCheckoutPreview(sessionId: string) {
     exactTotal,
     roundedTotal,
     orderItems: orderItemsList,
+    isPackageSession,
   };
 }
 
-// تسوية الحساب مع تسجيل مبيعات الكاش ومبيعات الفيزا في الحسابات العامة
 export async function settleAndCloseSession(input: {
   sessionId: string;
   discountAmount?: number;
@@ -539,11 +617,12 @@ export async function settleAndCloseSession(input: {
     }
 
     const now = new Date();
+    const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
     let totalTimeCost = 0;
 
     for (const slot of session.slots) {
       const end = slot.endTime ?? now;
-      const cost = calculateSlotCost(slot.startTime, end, slot.hourlyRate);
+      const cost = isPackageSession ? 0 : calculateSlotCost(slot.startTime, end, slot.hourlyRate);
 
       if (!slot.endTime) {
         await tx.timeSlot.update({
@@ -552,6 +631,13 @@ export async function settleAndCloseSession(input: {
         });
       }
       totalTimeCost += cost;
+    }
+
+    if (isPackageSession && session.customerId) {
+      const playedMinutes = Math.max(1, Math.round((now.getTime() - session.startTime.getTime()) / 60000));
+      const { deductMinutesFromPackage } = await import("@/app/actions/packages");
+      await deductMinutesFromPackage(session.customerId, playedMinutes);
+      totalTimeCost = 0;
     }
 
     totalTimeCost = Number(totalTimeCost.toFixed(2));
@@ -565,33 +651,25 @@ export async function settleAndCloseSession(input: {
     const paidAmount = Number(input.paidAmount);
     const remainingDebt = Math.max(0, Number((netPayable - paidAmount).toFixed(2)));
 
-    // 1. حساب العميل والآجل (المديونيات)
-    if (remainingDebt > 0) {
-      if (!session.customerId) {
-        throw new Error("لا يمكن تسجيل دين متبقي على عميل عابر. يرجى سداد المبلغ كاملاً أو ربط الجلسة بعميل مسجل.");
-      }
+    if (remainingDebt > 0 && session.customerId) {
       await tx.customer.update({
         where: { id: session.customerId },
         data: { debt: { increment: remainingDebt } },
       });
     }
 
-    // 2. معالجة النقدية والفيزا في الحسابات المالية
     let cashAmount = 0;
     let cardAmount = 0;
 
-    if (input.paymentMethod === "CASH") {
-      cashAmount = Math.min(paidAmount, netPayable);
-    } else if (input.paymentMethod === "CARD") {
-      cardAmount = Math.min(paidAmount, netPayable);
-    } else if (input.paymentMethod === "MIXED") {
+    if (input.paymentMethod === "CASH") cashAmount = Math.min(paidAmount, netPayable);
+    else if (input.paymentMethod === "CARD") cardAmount = Math.min(paidAmount, netPayable);
+    else if (input.paymentMethod === "MIXED") {
       cashAmount = Number(input.cashPortion ?? 0);
       cardAmount = Math.max(0, paidAmount - cashAmount);
     }
 
     const finalDrawerId = input.targetCashDrawerId || session.shift?.cashDrawerId;
 
-    // أ) في حالة الكاش: يزداد رصيد الدرج الورقي ويسجل إيراد نقدي
     if (cashAmount > 0 && finalDrawerId) {
       await tx.cashDrawer.update({
         where: { id: finalDrawerId },
@@ -609,7 +687,6 @@ export async function settleAndCloseSession(input: {
       });
     }
 
-    // ب) في حالة الفيزا: يسجل قيد حركة بنكية/إلكترونية لمطابقة الحساب البنكي وماكينة الدفع
     if (cardAmount > 0 && finalDrawerId) {
       await tx.financialTransaction.create({
         data: {
@@ -617,12 +694,11 @@ export async function settleAndCloseSession(input: {
           shiftId: session.shiftId,
           type: "INCOME_CARD",
           amount: cardAmount,
-          description: `تحصيل فيزا/شبكة - جلسة (${session.device.name}) - عميل: ${session.customer?.name ?? "عابر"}`,
+          description: `تحصيل فيزا - جلسة (${session.device.name}) - عميل: ${session.customer?.name ?? "عابر"}`,
         },
       });
     }
 
-    // 3. تحويل طلبات الكافيه غير المدفوعة إلى مدفوعة
     await tx.order.updateMany({
       where: { sessionId: session.id, status: "PENDING" },
       data: {
@@ -631,18 +707,6 @@ export async function settleAndCloseSession(input: {
       },
     });
 
-    // 4. احتساب نقاط الولاء للعميل (نقطة لكل 50 ج.م مدفوعة)
-    if (session.customerId && paidAmount >= 50) {
-      const earnedPts = Math.floor(paidAmount / 50);
-      if (earnedPts > 0) {
-        await tx.customer.update({
-          where: { id: session.customerId },
-          data: { loyaltyPts: { increment: earnedPts } },
-        });
-      }
-    }
-
-    // 5. إغلاق الجلسة وتحديث تكاليفها النهائية بالرقم المقرب
     const finalSession = await tx.deviceSession.update({
       where: { id: session.id },
       data: {
@@ -662,6 +726,7 @@ export async function settleAndCloseSession(input: {
     revalidatePath("/pos");
     revalidatePath("/shifts");
     revalidatePath("/receipt");
+    revalidatePath("/packages");
     revalidatePath("/");
 
     return {

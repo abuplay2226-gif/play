@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-
+import { setSignedSessionCookie } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 
 export type CustomerBookingRow = {
@@ -55,6 +55,7 @@ export async function createCustomerBooking(formData: FormData): Promise<void> {
 
   const deviceType = deviceTypeMap[serviceType] ?? "PS5";
 
+  // 1. إنشاء أو جلب العميل
   const customer = await prisma.customer.upsert({
     where: { phone },
     update: { name },
@@ -69,15 +70,23 @@ export async function createCustomerBooking(formData: FormData): Promise<void> {
   const startDate = new Date(`${bookingDate}T${bookingTime || "09:00"}:00`);
   const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
 
-  const device = await prisma.device.findFirst({
+  // 2. البحث عن جهاز متاح
+  let device = await prisma.device.findFirst({
     where: { type: deviceType },
     orderBy: { name: "asc" },
   });
 
   if (!device) {
-    throw new Error("لا توجد أجهزة متوفرة حالياً لهذا النوع من الخدمة");
+    device = await prisma.device.findFirst({
+      orderBy: { name: "asc" },
+    });
   }
 
+  if (!device) {
+    throw new Error("لا توجد أجهزة مسجلة بالصالة حالياً");
+  }
+
+  // 3. إنشاء الحجز
   await prisma.booking.create({
     data: {
       customerId: customer.id,
@@ -89,6 +98,15 @@ export async function createCustomerBooking(formData: FormData): Promise<void> {
     },
   });
 
+  // 4. تسجيل دخول العميل تلقائياً وإنشاء Session Cookie
+  await setSignedSessionCookie({
+    userId: customer.id,
+    phone: customer.phone,
+    name: customer.name ?? customer.phone,
+    role: "CUSTOMER",
+  });
+
   revalidatePath("/customer");
+  revalidatePath("/bookings");
   redirect("/customer");
 }

@@ -1,12 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-
 import { assertAuthorized } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 
-// تعريف الأنواع محلياً لمنع أي خطأ استيراد من بريزما
-export type TournamentType = "LEAGUE" | "KNOCKOUT" | "SUPER_CUP";
+export type TournamentType = "LEAGUE" | "KNOCKOUT";
 export type MatchStage =
   | "GROUP"
   | "ROUND_OF_16"
@@ -15,45 +13,46 @@ export type MatchStage =
   | "THIRD_PLACE"
   | "FINAL";
 
-// 1. جلب كل البطولات
+interface PlayerDrawItem {
+  id: string;
+  target: number;
+  assigned: number;
+}
+
+function parseParticipantTeam(rawTeamName?: string | null, defaultCount = 3) {
+  if (!rawTeamName) return { teamName: "", targetMatches: defaultCount };
+  const parts = rawTeamName.split("###");
+  if (parts.length >= 2) {
+    const count = parseInt(parts[1], 10);
+    return {
+      teamName: parts[0].trim(),
+      targetMatches: !isNaN(count) && count > 0 ? count : defaultCount,
+    };
+  }
+  return { teamName: rawTeamName.trim(), targetMatches: defaultCount };
+}
+
+function encodeParticipantTeam(teamName?: string | null, targetMatches = 3) {
+  const cleanTeam = (teamName || "").trim();
+  return `${cleanTeam}###${Math.max(1, targetMatches)}`;
+}
+
 export async function getTournaments() {
   return (prisma as any).tournament.findMany({
     include: {
       participants: { include: { customer: true } },
       matches: true,
-      groups: true,
     },
     orderBy: { createdAt: "desc" },
   });
 }
 
-// 2. جلب تفاصيل بطولة محددة مع كل بياناتها ومبارياتها
 export async function getTournamentDetails(tournamentId: string) {
   return (prisma as any).tournament.findUnique({
     where: { id: tournamentId },
     include: {
-      groups: {
-        include: {
-          participants: {
-            include: { customer: true },
-            orderBy: [
-              { points: "desc" },
-              { goalDiff: "desc" },
-              { goalsFor: "desc" },
-            ],
-          },
-          matches: {
-            include: {
-              player1: { include: { customer: true } },
-              player2: { include: { customer: true } },
-              winner: { include: { customer: true } },
-            },
-            orderBy: [{ roundNumber: "asc" }, { matchNumber: "asc" }],
-          },
-        },
-      },
       participants: {
-        include: { customer: true, group: true },
+        include: { customer: true },
         orderBy: [
           { points: "desc" },
           { goalDiff: "desc" },
@@ -65,7 +64,6 @@ export async function getTournamentDetails(tournamentId: string) {
           player1: { include: { customer: true } },
           player2: { include: { customer: true } },
           winner: { include: { customer: true } },
-          group: true,
         },
         orderBy: [{ roundNumber: "asc" }, { matchNumber: "asc" }],
       },
@@ -73,16 +71,11 @@ export async function getTournamentDetails(tournamentId: string) {
   });
 }
 
-// 3. إنشاء بطولة جديدة
 export async function createTournament(input: {
   title: string;
   gameName: string;
   type: TournamentType;
-  entryFee?: number;
-  prizePool?: number;
-  groupCount?: number;
-  qualifiersPerGroup?: number;
-  startDate?: Date | string;
+  defaultMatchesPerPlayer?: number;
 }) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
 
@@ -90,48 +83,38 @@ export async function createTournament(input: {
   const gameName = input.gameName.trim();
   if (!title || !gameName) throw new Error("اسم البطولة واسم اللعبة مطلوبان");
 
-  const groupCount = input.type === "LEAGUE" ? Math.max(1, input.groupCount || 2) : 1;
-
-  return await prisma.$transaction(async (tx) => {
-    const tournament = await (tx as any).tournament.create({
-      data: {
-        title,
-        gameName,
-        type: input.type,
-        entryFee: Number(input.entryFee || 0),
-        prizePool: Number(input.prizePool || 0),
-        groupCount,
-        qualifiersPerGroup: Math.max(1, input.qualifiersPerGroup || 2),
-        startDate: input.startDate ? new Date(input.startDate) : new Date(),
-        status: "REGISTRATION",
-      },
-    });
-
-    // إنشاء المجموعات الفارغة إذا كانت البطولة بنظام الدوري/المجموعات
-    if (input.type === "LEAGUE") {
-      const groupNames = ["A", "B", "C", "D", "E", "F", "G", "H"];
-      for (let i = 0; i < groupCount; i++) {
-        await (tx as any).tournamentGroup.create({
-          data: {
-            tournamentId: tournament.id,
-            name: `المجموعة ${groupNames[i] || i + 1}`,
-          },
-        });
-      }
-    }
-
-    revalidatePath("/tournaments");
-    return tournament;
+  const tournament = await (prisma as any).tournament.create({
+    data: {
+      title,
+      gameName,
+      type: input.type,
+      entryFee: 0,
+      prizePool: 0,
+      groupCount: 1,
+      qualifiersPerGroup: Number(input.defaultMatchesPerPlayer || (input.type === "KNOCKOUT" ? 1 : 3)),
+      startDate: new Date(),
+      status: "REGISTRATION",
+    },
   });
+
+  revalidatePath("/tournaments");
+  return tournament;
 }
 
-// 4. تسجيل لاعبين في البطولة من قائمة العملاء
 export async function registerTournamentParticipant(input: {
   tournamentId: string;
   customerId: string;
   teamName?: string;
+  targetMatches?: number;
 }) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  const tournament = await (prisma as any).tournament.findUnique({
+    where: { id: input.tournamentId },
+  });
+
+  const matchesCount = Number(input.targetMatches || tournament?.qualifiersPerGroup || 3);
+  const combinedTeam = encodeParticipantTeam(input.teamName, matchesCount);
 
   const existing = await (prisma as any).tournamentParticipant.findFirst({
     where: {
@@ -140,13 +123,29 @@ export async function registerTournamentParticipant(input: {
     },
   });
 
-  if (existing) throw new Error("هذا العميل مسجل بالفعل في البطولة");
+  if (existing) {
+    const updated = await (prisma as any).tournamentParticipant.update({
+      where: { id: existing.id },
+      data: { teamName: combinedTeam },
+    });
+    revalidatePath(`/tournaments/${input.tournamentId}`);
+    return updated;
+  }
 
   const participant = await (prisma as any).tournamentParticipant.create({
     data: {
       tournamentId: input.tournamentId,
       customerId: input.customerId,
-      teamName: input.teamName?.trim() || null,
+      teamName: combinedTeam,
+      points: 0,
+      played: 0,
+      won: 0,
+      drawn: 0,
+      lost: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      goalDiff: 0,
+      isQualified: tournament?.type === "KNOCKOUT", // في الكأس يتأهل الجميع للقرعة مباشرة
     },
   });
 
@@ -154,129 +153,126 @@ export async function registerTournamentParticipant(input: {
   return participant;
 }
 
-// 5. إجراء القرعة وتوليد المباريات آلياً
-export async function generateTournamentDraw(tournamentId: string) {
+export async function updateParticipantMatchesCount(participantId: string, targetMatches: number) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
 
-  return await prisma.$transaction(async (tx) => {
-    const tournament = await (tx as any).tournament.findUnique({
+  const current = await (prisma as any).tournamentParticipant.findUnique({
+    where: { id: participantId },
+  });
+
+  if (!current) throw new Error("اللاعب غير موجود");
+
+  const { teamName } = parseParticipantTeam(current.teamName);
+  const updatedTeam = encodeParticipantTeam(teamName, targetMatches);
+
+  const updated = await (prisma as any).tournamentParticipant.update({
+    where: { id: participantId },
+    data: { teamName: updatedTeam },
+  });
+
+  revalidatePath(`/tournaments/${updated.tournamentId}`);
+  return updated;
+}
+
+export async function deleteTournamentParticipant(participantId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  const deleted = await (prisma as any).tournamentParticipant.delete({
+    where: { id: participantId },
+  });
+
+  revalidatePath(`/tournaments/${deleted.tournamentId}`);
+  return deleted;
+}
+
+// 1. القرعة العشوائية لمباريات الدوري العام
+export async function generateLeagueDraw(tournamentId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  return await prisma.$transaction(async (tx: any) => {
+    const tournament = await tx.tournament.findUnique({
       where: { id: tournamentId },
-      include: {
-        participants: true,
-        groups: true,
-      },
+      include: { participants: true },
     });
 
     if (!tournament) throw new Error("البطولة غير موجودة");
-    if (tournament.participants.length < 2) throw new Error("يجب تسجيل لاعبين اثنين على الأقل لإجراء القرعة");
-
-    const shuffled = [...tournament.participants].sort(() => Math.random() - 0.5);
-
-    // حذف أي مباريات قديمة لإعادة القرعة
-    await (tx as any).tournamentMatch.deleteMany({ where: { tournamentId } });
-
-    // نظام المجموعات والدوري
-    if (tournament.type === "LEAGUE") {
-      const groups = tournament.groups;
-      if (groups.length === 0) throw new Error("لا توجد مجموعات منشأة في البطولة");
-
-      for (let i = 0; i < shuffled.length; i++) {
-        const targetGroup = groups[i % groups.length];
-        await (tx as any).tournamentParticipant.update({
-          where: { id: shuffled[i].id },
-          data: { groupId: targetGroup.id },
-        });
-      }
-
-      for (const group of groups) {
-        const groupPlayers = await (tx as any).tournamentParticipant.findMany({
-          where: { tournamentId, groupId: group.id },
-        });
-
-        let matchNumber = 1;
-        for (let i = 0; i < groupPlayers.length; i++) {
-          for (let j = i + 1; j < groupPlayers.length; j++) {
-            await (tx as any).tournamentMatch.create({
-              data: {
-                tournamentId,
-                groupId: group.id,
-                stage: "GROUP",
-                roundNumber: 1,
-                matchNumber: matchNumber++,
-                player1Id: groupPlayers[i].id,
-                player2Id: groupPlayers[j].id,
-                status: "SCHEDULED",
-              },
-            });
-          }
-        }
-      }
+    if (tournament.participants.length < 2) {
+      throw new Error("يجب إضافة لاعبين اثنين على الأقل لإجراء القرعة");
     }
 
-    // نظام الكأس خروج المغلوب
-    if (tournament.type === "KNOCKOUT") {
-      let stage: MatchStage = "FINAL";
-      if (shuffled.length > 8) stage = "ROUND_OF_16";
-      else if (shuffled.length > 4) stage = "QUARTER_FINAL";
-      else if (shuffled.length > 2) stage = "SEMI_FINAL";
+    await tx.tournamentMatch.deleteMany({
+      where: { tournamentId, stage: "GROUP" },
+    });
 
-      let matchNumber = 1;
-      for (let i = 0; i < shuffled.length; i += 2) {
-        await (tx as any).tournamentMatch.create({
-          data: {
-            tournamentId,
-            stage,
-            roundNumber: 1,
-            matchNumber: matchNumber++,
-            player1Id: shuffled[i]?.id ?? null,
-            player2Id: shuffled[i + 1]?.id ?? null,
-            status: "SCHEDULED",
-          },
-        });
-      }
+    for (const p of tournament.participants) {
+      await tx.tournamentParticipant.update({
+        where: { id: p.id },
+        data: {
+          played: 0,
+          won: 0,
+          drawn: 0,
+          lost: 0,
+          goalsFor: 0,
+          goalsAgainst: 0,
+          goalDiff: 0,
+          points: 0,
+        },
+      });
     }
 
-    // نظام السوبر
-    if (tournament.type === "SUPER_CUP") {
-      if (shuffled.length === 2) {
-        await (tx as any).tournamentMatch.create({
-          data: {
-            tournamentId,
-            stage: "FINAL",
-            roundNumber: 1,
-            matchNumber: 1,
-            player1Id: shuffled[0].id,
-            player2Id: shuffled[1].id,
-            status: "SCHEDULED",
-          },
-        });
+    const players: PlayerDrawItem[] = tournament.participants.map((p: any) => {
+      const { targetMatches } = parseParticipantTeam(p.teamName, tournament.qualifiersPerGroup || 3);
+      return { id: p.id, target: targetMatches, assigned: 0 };
+    });
+
+    const pairsSet = new Set<string>();
+    const matchesToCreate: Array<{ p1: string; p2: string }> = [];
+
+    let attempts = 0;
+    const maxAttempts = 2000;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      players.sort((a: PlayerDrawItem, b: PlayerDrawItem) => (b.target - b.assigned) - (a.target - a.assigned));
+
+      const needMatches: PlayerDrawItem[] = players.filter((p: PlayerDrawItem) => p.assigned < p.target);
+      if (needMatches.length < 2) break;
+
+      const p1 = needMatches[0];
+      const validOpponents: PlayerDrawItem[] = needMatches
+        .slice(1)
+        .filter((cand: PlayerDrawItem) => !pairsSet.has(`${p1.id}-${cand.id}`) && !pairsSet.has(`${cand.id}-${p1.id}`));
+
+      const candidate: PlayerDrawItem | undefined = validOpponents.length > 0
+        ? validOpponents[Math.floor(Math.random() * validOpponents.length)]
+        : needMatches[1];
+
+      if (candidate) {
+        p1.assigned++;
+        candidate.assigned++;
+        pairsSet.add(`${p1.id}-${candidate.id}`);
+        matchesToCreate.push({ p1: p1.id, p2: candidate.id });
       } else {
-        await (tx as any).tournamentMatch.create({
-          data: {
-            tournamentId,
-            stage: "SEMI_FINAL",
-            roundNumber: 1,
-            matchNumber: 1,
-            player1Id: shuffled[0]?.id,
-            player2Id: shuffled[1]?.id,
-            status: "SCHEDULED",
-          },
-        });
-        await (tx as any).tournamentMatch.create({
-          data: {
-            tournamentId,
-            stage: "SEMI_FINAL",
-            roundNumber: 1,
-            matchNumber: 2,
-            player1Id: shuffled[2]?.id,
-            player2Id: shuffled[3]?.id,
-            status: "SCHEDULED",
-          },
-        });
+        break;
       }
     }
 
-    await (tx as any).tournament.update({
+    let matchNumber = 1;
+    for (const m of matchesToCreate) {
+      await tx.tournamentMatch.create({
+        data: {
+          tournamentId,
+          stage: "GROUP",
+          roundNumber: 1,
+          matchNumber: matchNumber++,
+          player1Id: m.p1,
+          player2Id: m.p2,
+          status: "SCHEDULED",
+        },
+      });
+    }
+
+    await tx.tournament.update({
       where: { id: tournamentId },
       data: { status: "ONGOING" },
     });
@@ -286,7 +282,168 @@ export async function generateTournamentDraw(tournamentId: string) {
   });
 }
 
-// 6. تسجيل نتيجة مباراة وحساب الترتيب والنقاط
+// 2. القرعة العشوائية المباشرة لبطولة الكأس (الدور الأول) أو المتأهلين من الدوري
+export async function generateKnockoutDraw(tournamentId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  return await prisma.$transaction(async (tx: any) => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      include: {
+        participants: true,
+      },
+    });
+
+    if (!tournament) throw new Error("البطولة غير موجودة");
+
+    // إذا كانت بطولة دوري، نأخذ فقط المؤهلين (isQualified)
+    // إذا كانت بطولة كأس، نأخذ جميع المشاركين
+    const pool = tournament.type === "KNOCKOUT"
+      ? tournament.participants
+      : tournament.participants.filter((p: any) => p.isQualified);
+
+    if (pool.length < 2) {
+      throw new Error("يجب توفر لاعبين اثنين على الأقل لإجراء قرعة خروج المغلوب");
+    }
+
+    // حذف أي مباريات إقصائية سابقة لإعادة القرعة
+    await tx.tournamentMatch.deleteMany({
+      where: { tournamentId, stage: { not: "GROUP" } },
+    });
+
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+
+    let stage: MatchStage = "FINAL";
+    if (shuffled.length > 8) stage = "ROUND_OF_16";
+    else if (shuffled.length > 4) stage = "QUARTER_FINAL";
+    else if (shuffled.length > 2) stage = "SEMI_FINAL";
+
+    let matchNumber = 1;
+    for (let i = 0; i < shuffled.length; i += 2) {
+      await tx.tournamentMatch.create({
+        data: {
+          tournamentId,
+          stage,
+          roundNumber: 1,
+          matchNumber: matchNumber++,
+          player1Id: shuffled[i]?.id ?? null,
+          player2Id: shuffled[i + 1]?.id ?? null,
+          status: "SCHEDULED",
+        },
+      });
+    }
+
+    await tx.tournament.update({
+      where: { id: tournamentId },
+      data: { status: "ONGOING" },
+    });
+
+    revalidatePath(`/tournaments/${tournamentId}`);
+    return true;
+  });
+}
+
+// 3. إجراء قرعة الدور التالي للفائزين فقط + توليد مباراة المركز الثالث عند نصف النهائي
+export async function advanceKnockoutNextRound(tournamentId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER"]);
+
+  return await prisma.$transaction(async (tx: any) => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      include: {
+        matches: {
+          where: { stage: { not: "GROUP" } },
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (!tournament) throw new Error("البطولة غير موجودة");
+
+    // استنتاج الدور الحالي النشط
+    const stagesOrder: MatchStage[] = ["ROUND_OF_16", "QUARTER_FINAL", "SEMI_FINAL", "FINAL"];
+    const currentMatches = tournament.matches;
+
+    // البحث عن أحدث دور موجود
+    let latestStage: MatchStage | null = null;
+    for (const st of stagesOrder) {
+      if (currentMatches.some((m: any) => m.stage === st)) {
+        latestStage = st;
+      }
+    }
+
+    if (!latestStage) throw new Error("لم يتم بدء الأدوار الإقصائية بعد");
+
+    const matchesOfCurrentStage = currentMatches.filter((m: any) => m.stage === latestStage);
+    const incomplete = matchesOfCurrentStage.some((m: any) => !m.isCompleted || !m.winnerId);
+
+    if (incomplete) {
+      throw new Error("يجب تسجيل نتائج جميع مباريات الدور الحالي لتحديد الفائزين قبل إجراء قرعة الدور التالي");
+    }
+
+    const winnerIds = matchesOfCurrentStage.map((m: any) => m.winnerId);
+
+    // إذا كان الدور الحالي هو نصف النهائي (SEMI_FINAL) -> نولد النهائي + مباراة المركز الثالث
+    if (latestStage === "SEMI_FINAL") {
+      // 1. مباراة النهائي بين الفائزين الاثنين
+      await tx.tournamentMatch.create({
+        data: {
+          tournamentId,
+          stage: "FINAL",
+          roundNumber: 3,
+          matchNumber: 1,
+          player1Id: winnerIds[0],
+          player2Id: winnerIds[1],
+          status: "SCHEDULED",
+        },
+      });
+
+      // 2. مباراة تحديد المركز الثالث بين الخاسرين
+      const loserIds = matchesOfCurrentStage.map((m: any) =>
+        m.player1Id === m.winnerId ? m.player2Id : m.player1Id
+      );
+
+      if (loserIds[0] && loserIds[1]) {
+        await tx.tournamentMatch.create({
+          data: {
+            tournamentId,
+            stage: "THIRD_PLACE",
+            roundNumber: 3,
+            matchNumber: 2,
+            player1Id: loserIds[0],
+            player2Id: loserIds[1],
+            status: "SCHEDULED",
+          },
+        });
+      }
+    } else if (latestStage === "ROUND_OF_16" || latestStage === "QUARTER_FINAL") {
+      const nextStage: MatchStage = latestStage === "ROUND_OF_16" ? "QUARTER_FINAL" : "SEMI_FINAL";
+      const shuffledWinners = [...winnerIds].sort(() => Math.random() - 0.5);
+
+      let matchNum = 1;
+      for (let i = 0; i < shuffledWinners.length; i += 2) {
+        await tx.tournamentMatch.create({
+          data: {
+            tournamentId,
+            stage: nextStage,
+            roundNumber: latestStage === "ROUND_OF_16" ? 2 : 3,
+            matchNumber: matchNum++,
+            player1Id: shuffledWinners[i] ?? null,
+            player2Id: shuffledWinners[i + 1] ?? null,
+            status: "SCHEDULED",
+          },
+        });
+      }
+    } else {
+      throw new Error("وصلت البطولة للمباراة النهائية بالفعل!");
+    }
+
+    revalidatePath(`/tournaments/${tournamentId}`);
+    return true;
+  });
+}
+
+// 4. تسجيل نتيجة المباراة وتحديث الترتيب
 export async function recordMatchScore(input: {
   matchId: string;
   player1Score: number;
@@ -295,18 +452,14 @@ export async function recordMatchScore(input: {
 }) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
 
-  return await prisma.$transaction(async (tx) => {
-    const match = await (tx as any).tournamentMatch.findUnique({
+  return await prisma.$transaction(async (tx: any) => {
+    const match = await tx.tournamentMatch.findUnique({
       where: { id: input.matchId },
-      include: {
-        tournament: true,
-        player1: true,
-        player2: true,
-      },
+      include: { tournament: true },
     });
 
     if (!match || !match.player1Id || !match.player2Id) {
-      throw new Error("المباراة غير صالحة أو ينقصها أحد الطرفين");
+      throw new Error("المباراة غير صالحة");
     }
 
     const p1Score = Number(input.player1Score);
@@ -317,7 +470,7 @@ export async function recordMatchScore(input: {
     else if (p2Score > p1Score) winnerId = match.player2Id;
     else winnerId = input.winnerId || null;
 
-    await (tx as any).tournamentMatch.update({
+    await tx.tournamentMatch.update({
       where: { id: input.matchId },
       data: {
         player1Score: p1Score,
@@ -328,63 +481,64 @@ export async function recordMatchScore(input: {
       },
     });
 
-    // إذا كانت المباراة ضمن المجموعات: حساب النقاط التلقائي
-    if (match.stage === "GROUP" && match.groupId) {
-      const p1Points = p1Score > p2Score ? 3 : p1Score === p2Score ? 1 : 0;
-      const p1Won = p1Score > p2Score ? 1 : 0;
-      const p1Drawn = p1Score === p2Score ? 1 : 0;
-      const p1Lost = p1Score < p2Score ? 1 : 0;
-
-      await (tx as any).tournamentParticipant.update({
-        where: { id: match.player1Id },
-        data: {
-          played: { increment: 1 },
-          won: { increment: p1Won },
-          drawn: { increment: p1Drawn },
-          lost: { increment: p1Lost },
-          goalsFor: { increment: p1Score },
-          goalsAgainst: { increment: p2Score },
-          goalDiff: { increment: p1Score - p2Score },
-          points: { increment: p1Points },
-        },
+    if (match.stage === "GROUP") {
+      const allLeagueMatches = await tx.tournamentMatch.findMany({
+        where: { tournamentId: match.tournamentId, stage: "GROUP", isCompleted: true },
       });
 
-      const p2Points = p2Score > p1Score ? 3 : p1Score === p2Score ? 1 : 0;
-      const p2Won = p2Score > p1Score ? 1 : 0;
-      const p2Drawn = p1Score === p2Score ? 1 : 0;
-      const p2Lost = p2Score < p1Score ? 1 : 0;
+      const statsMap: Record<string, { played: number; won: number; drawn: number; lost: number; gf: number; ga: number; pts: number }> = {};
 
-      await (tx as any).tournamentParticipant.update({
-        where: { id: match.player2Id },
-        data: {
-          played: { increment: 1 },
-          won: { increment: p2Won },
-          drawn: { increment: p2Drawn },
-          lost: { increment: p2Lost },
-          goalsFor: { increment: p2Score },
-          goalsAgainst: { increment: p1Score },
-          goalDiff: { increment: p2Score - p1Score },
-          points: { increment: p2Points },
-        },
-      });
+      for (const m of allLeagueMatches) {
+        if (!m.player1Id || !m.player2Id || m.player1Score === null || m.player2Score === null) continue;
 
-      // ترتيب المجموعة وتحديد المتأهلين
-      const groupRanked = await (tx as any).tournamentParticipant.findMany({
-        where: { tournamentId: match.tournamentId, groupId: match.groupId },
-        orderBy: [
-          { points: "desc" },
-          { goalDiff: "desc" },
-          { goalsFor: "desc" },
-        ],
-      });
+        if (!statsMap[m.player1Id]) statsMap[m.player1Id] = { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, pts: 0 };
+        if (!statsMap[m.player2Id]) statsMap[m.player2Id] = { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, pts: 0 };
 
-      const qualifiersCount = match.tournament.qualifiersPerGroup || 2;
-      for (let i = 0; i < groupRanked.length; i++) {
-        await (tx as any).tournamentParticipant.update({
-          where: { id: groupRanked[i].id },
-          data: { isQualified: i < qualifiersCount },
+        statsMap[m.player1Id].played++;
+        statsMap[m.player2Id].played++;
+        statsMap[m.player1Id].gf += m.player1Score;
+        statsMap[m.player1Id].ga += m.player2Score;
+        statsMap[m.player2Id].gf += m.player2Score;
+        statsMap[m.player2Id].ga += m.player1Score;
+
+        if (m.player1Score > m.player2Score) {
+          statsMap[m.player1Id].won++;
+          statsMap[m.player1Id].pts += 3;
+          statsMap[m.player2Id].lost++;
+        } else if (m.player2Score > m.player1Score) {
+          statsMap[m.player2Id].won++;
+          statsMap[m.player2Id].pts += 3;
+          statsMap[m.player1Id].lost++;
+        } else {
+          statsMap[m.player1Id].drawn++;
+          statsMap[m.player2Id].drawn++;
+          statsMap[m.player1Id].pts += 1;
+          statsMap[m.player2Id].pts += 1;
+        }
+      }
+
+      for (const [playerId, s] of Object.entries(statsMap)) {
+        await tx.tournamentParticipant.update({
+          where: { id: playerId },
+          data: {
+            played: s.played,
+            won: s.won,
+            drawn: s.drawn,
+            lost: s.lost,
+            goalsFor: s.gf,
+            goalsAgainst: s.ga,
+            goalDiff: s.gf - s.ga,
+            points: s.pts,
+          },
         });
       }
+    }
+
+    if (match.stage === "FINAL" && winnerId) {
+      await tx.tournament.update({
+        where: { id: match.tournamentId },
+        data: { status: "COMPLETED" },
+      });
     }
 
     revalidatePath(`/tournaments/${match.tournamentId}`);
@@ -392,11 +546,7 @@ export async function recordMatchScore(input: {
   });
 }
 
-// 7. تغيير حالة الصعود يدوياً
-export async function toggleParticipantQualification(
-  participantId: string,
-  isQualified: boolean
-) {
+export async function toggleParticipantQualification(participantId: string, isQualified: boolean) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
 
   const updated = await (prisma as any).tournamentParticipant.update({

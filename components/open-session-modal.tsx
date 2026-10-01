@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { openDeviceSession, quickCreateCustomer } from "@/app/actions/devices";
+import { getCustomerActivePackages, type CustomerSubscription } from "@/app/actions/packages";
 import type { SlotType } from "@prisma/client";
 
 interface CustomerItem {
@@ -37,14 +38,36 @@ export function OpenSessionModal({
   const [isWalkIn, setIsWalkIn] = useState(false);
   const [slotType, setSlotType] = useState<SlotType>("SINGLE");
 
-  // التحكم بنوع المدة (مفتوح أو محدد بالدقائق)
+  // باقة العميل
+  const [activePackage, setActivePackage] = useState<CustomerSubscription | null>(null);
+  const [usePackage, setUsePackage] = useState<boolean>(false);
+
+  // التحكم بالمدة
   const [isFixedDuration, setIsFixedDuration] = useState<boolean>(false);
-  const [selectedMinutes, setSelectedMinutes] = useState<number>(60); // افتراضي ساعة
+  const [selectedMinutes, setSelectedMinutes] = useState<number>(60);
 
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [addError, setAddError] = useState("");
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      getCustomerActivePackages(selectedCustomer.id).then((subs) => {
+        const validSub = subs.find((s) => s.isActive);
+        if (validSub) {
+          setActivePackage(validSub);
+          setUsePackage(true);
+        } else {
+          setActivePackage(null);
+          setUsePackage(false);
+        }
+      });
+    } else {
+      setActivePackage(null);
+      setUsePackage(false);
+    }
+  }, [selectedCustomer]);
 
   const filteredCustomers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -63,6 +86,8 @@ export function OpenSessionModal({
   const handleSelectWalkIn = () => {
     setIsWalkIn(true);
     setSelectedCustomer(null);
+    setActivePackage(null);
+    setUsePackage(false);
     setSearchQuery("");
   };
 
@@ -113,12 +138,12 @@ export function OpenSessionModal({
         slotType,
         customerId: selectedCustomer?.id ?? null,
         plannedMinutes: isFixedDuration ? selectedMinutes : null,
+        usePackage: Boolean(usePackage && activePackage),
       });
       setIsOpen(false);
     });
   };
 
-  // حساب التكلفة التقديرية للوقت المحدد
   const currentHourlyRate = slotType === "MULTI" ? device.multiHourlyRate : device.singleHourlyRate;
   const estimatedCost = isFixedDuration
     ? ((selectedMinutes / 60) * currentHourlyRate).toFixed(2)
@@ -155,16 +180,39 @@ export function OpenSessionModal({
             <div className="mb-4">
               <label className="mb-1.5 block text-xs font-bold text-slate-300">بيانات العميل:</label>
               {selectedCustomer ? (
-                <div className="flex items-center justify-between rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-3">
-                  <div>
-                    <p className="font-bold text-emerald-300">👤 {selectedCustomer.name}</p>
-                    <p className="text-xs text-slate-300 font-mono">
-                      📞 {selectedCustomer.phone} · ⭐ {selectedCustomer.loyaltyPts} نقطة
-                    </p>
+                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-emerald-300">👤 {selectedCustomer.name}</p>
+                      <p className="text-xs text-slate-300 font-mono">
+                        📞 {selectedCustomer.phone} · ⭐ {selectedCustomer.loyaltyPts} نقطة
+                      </p>
+                    </div>
+                    <button onClick={() => setSelectedCustomer(null)} className="text-xs text-rose-400 hover:underline">
+                      تغيير
+                    </button>
                   </div>
-                  <button onClick={() => setSelectedCustomer(null)} className="text-xs text-rose-400 hover:underline">
-                    تغيير
-                  </button>
+
+                  {/* كاشف باقة العميل التلقائي */}
+                  {activePackage && (
+                    <div className="rounded-xl bg-slate-950/80 border border-emerald-500/40 p-2.5 flex items-center justify-between text-xs animate-in fade-in">
+                      <div>
+                        <span className="font-bold text-emerald-300 block">🎁 يمتلك: {activePackage.planName}</span>
+                        <span className="text-[10px] text-slate-400">
+                          الرصيد المتاح: <strong className="text-amber-300">{activePackage.remainingHoursText}</strong>
+                        </span>
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={usePackage}
+                          onChange={(e) => setUsePackage(e.target.checked)}
+                          className="rounded text-emerald-500 h-4 w-4"
+                        />
+                        <span className="font-bold text-[11px] text-emerald-300">خصم من الباقة</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               ) : isWalkIn ? (
                 <div className="flex items-center justify-between rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3">
@@ -250,7 +298,7 @@ export function OpenSessionModal({
               )}
             </div>
 
-            {/* 2. نوع اللعب (فردي / مجموعة) */}
+            {/* 2. نوع اللعب */}
             <div className="mb-4">
               <label className="mb-1.5 block text-xs font-bold text-slate-300">وضع اللعب:</label>
               <div className="grid grid-cols-2 gap-2">
@@ -264,7 +312,9 @@ export function OpenSessionModal({
                   }`}
                 >
                   <p className="text-xs font-black">جلسة فردية</p>
-                  <p className="font-mono text-xs font-bold text-sky-300 mt-0.5">{device.singleHourlyRate} ج.م / س</p>
+                  <p className="font-mono text-xs font-bold text-sky-300 mt-0.5">
+                    {usePackage ? "0 ج.م (بالباقة)" : `${device.singleHourlyRate} ج.م / س`}
+                  </p>
                 </button>
 
                 <button
@@ -277,12 +327,14 @@ export function OpenSessionModal({
                   }`}
                 >
                   <p className="text-xs font-black">جلسة مجموعة (زوجي)</p>
-                  <p className="font-mono text-xs font-bold text-indigo-300 mt-0.5">{device.multiHourlyRate} ج.م / س</p>
+                  <p className="font-mono text-xs font-bold text-indigo-300 mt-0.5">
+                    {usePackage ? "0 ج.م (بالباقة)" : `${device.multiHourlyRate} ج.م / س`}
+                  </p>
                 </button>
               </div>
             </div>
 
-            {/* 3. نظام المدة: وقت مفتوح أو وقت محدد مسبقاً */}
+            {/* 3. نظام المدة */}
             <div className="mb-6 rounded-2xl bg-slate-950/60 p-3.5 border border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-sky-300">نظام مدة الحجز:</label>
@@ -343,14 +395,13 @@ export function OpenSessionModal({
                       className="w-20 rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-center font-mono font-bold text-white outline-none"
                     />
                     <span className="font-bold text-amber-300 font-mono">
-                      ≈ {estimatedCost} ج.م
+                      {usePackage ? "0 ج.م (بالباقة)" : `≈ ${estimatedCost} ج.م`}
                     </span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* زر البدء */}
             <button
               type="button"
               disabled={isPending || (!selectedCustomer && !isWalkIn)}

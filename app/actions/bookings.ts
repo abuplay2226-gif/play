@@ -1,12 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-
 import { assertAuthorized } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 
 // ============================================================================
-// 1. دوال إدارة العملاء (تدعم الاستدعاء بمعامل واحد أو معاملين لمنع خطأ TS2554)
+// 1. دوال إدارة العملاء
 // ============================================================================
 
 export async function getCustomers() {
@@ -19,7 +18,7 @@ export async function getCustomers() {
   });
 }
 
-// دالة إنشاء العميل (تدعم كائناً أو معاملات منفصلة)
+// دالة إنشاء العميل
 export async function createCustomer(
   inputOrName:
     | string
@@ -72,7 +71,7 @@ export async function createCustomer(
   return customer;
 }
 
-// دالة تعديل العميل (تدعم updateCustomer(id, data) وتدعم updateCustomer({ id, ...data }))
+// دالة تعديل العميل
 export async function updateCustomer(
   idOrInput:
     | string
@@ -166,7 +165,6 @@ export async function createBooking(input: {
     throw new Error("تاريخ ووقت الحجز غير صحيح (يجب أن يكون وقت النهاية بعد البداية)");
   }
 
-  // لا يجوز حجز موعد في الماضي
   if (start < new Date()) {
     throw new Error("لا يمكن إنشاء حجز في وقت أو تاريخ قد فات بالفعل");
   }
@@ -251,7 +249,7 @@ export async function updateBooking(input: {
   return updated;
 }
 
-// تأكيد الحجز (مع المنع الصارم إذا فات موعده وتاريخه)
+// تأكيد الحجز
 export async function confirmBooking(bookingId: string) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
@@ -294,4 +292,132 @@ export async function cancelBooking(bookingId: string) {
 
   revalidatePath("/bookings");
   return updated;
+}
+
+// ============================================================================
+// 3. كشف الحساب التفصيلي للعميل (سجل الباقات والجلسات والمشاريب والديون)
+// ============================================================================
+
+export async function getCustomerLedger(customerId: string) {
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF", "CUSTOMER"]);
+
+  const [customer, sessions, transactions] = await Promise.all([
+    prisma.customer.findUnique({ where: { id: customerId } }),
+    prisma.deviceSession.findMany({
+      where: { customerId },
+      include: {
+        device: true,
+        slots: true,
+        orders: {
+          where: { status: { not: "CANCELLED" } },
+          include: { items: { include: { product: true } } },
+        },
+      },
+      orderBy: { startTime: "desc" },
+    }),
+    prisma.financialTransaction.findMany({
+      where: { customerId },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  if (!customer) throw new Error("العميل غير موجود");
+
+  const entries: Array<{
+    id: string;
+    date: Date;
+    type: "SESSION" | "PACKAGE_BUY" | "DEBT_PAYMENT";
+    title: string;
+    details: string;
+    amount: number;
+    badge: string;
+    badgeColor: string;
+  }> = [];
+
+  // 1. معالجة جلسات اللعب ومشاريب الكافيه واستهلاك الباقات
+  for (const s of sessions) {
+    const isPackage = s.fixedDuration === -999 || s.slots.some((slot) => slot.hourlyRate === 0);
+    const diffMs = (s.endTime ?? new Date()).getTime() - s.startTime.getTime();
+    const mins = Math.max(0, Math.floor(diffMs / 60000));
+    const durationText = `${Math.floor(mins / 60)} س و ${mins % 60} د`;
+
+    const cafeItems = s.orders.flatMap((o) =>
+      o.items.map((i) => `${i.product.name} (${i.quantity})`)
+    );
+    const cafeTotal = s.orders.reduce((sum, o) => sum + Number(o.totalAmount), 0);
+
+    let detailsText = `وقت اللعب: ${durationText}`;
+    if (isPackage) {
+      detailsText += ` · (مخصوم من رصيد الباقة ✨)`;
+    } else {
+      detailsText += ` · (تكلفة الوقت: ${s.timeCost} ج.م)`;
+    }
+
+    if (cafeItems.length > 0) {
+      detailsText += ` · مشاريب: ${cafeItems.join(" + ")} (${cafeTotal} ج.م)`;
+    }
+
+    entries.push({
+      id: s.id,
+      date: s.startTime,
+      type: "SESSION",
+      title: `جلسة لعب (${s.device.name})`,
+      details: detailsText,
+      amount: s.totalCost,
+      badge: isPackage ? "🎮 استهلاك باقة" : "🎮 جلسة عادية",
+      badgeColor: isPackage
+        ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+        : "bg-sky-500/20 text-sky-300 border-sky-500/30",
+    });
+  }
+
+  // 2. معالجة عمليات شراء الباقات وسداد الديون
+  for (const t of transactions) {
+    if (t.counterpartyName?.startsWith("PACKAGE_SUB:")) {
+      try {
+        const pkg = JSON.parse(t.counterpartyName.replace("PACKAGE_SUB:", ""));
+        entries.push({
+          id: t.id,
+          date: t.createdAt,
+          type: "PACKAGE_BUY",
+          title: `شراء باقة (${pkg.planName})`,
+          details: `تم شحن رصيد ${pkg.totalMinutes / 60} ساعة لعب · صالحة حتى ${new Date(pkg.expiryDate).toLocaleDateString("ar-EG")}`,
+          amount: t.amount,
+          badge: "🎁 شحن باقة",
+          badgeColor: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+        });
+      } catch {}
+    } else {
+      const isIncome = t.type === "INCOME";
+      entries.push({
+        id: t.id,
+        date: t.createdAt,
+        type: "DEBT_PAYMENT",
+        title: isIncome ? "سداد دين نقدياً بالخزينة" : "سند نقدية",
+        details: t.description,
+        amount: t.amount,
+        badge: isIncome ? "💵 سداد دين" : "💸 سند صرف",
+        badgeColor: isIncome
+          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+          : "bg-rose-500/20 text-rose-300 border-rose-500/30",
+      });
+    }
+  }
+
+  // ترتيب الحركات تنازلياً من الأحدث للأقدم
+  entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return {
+    customer: {
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      debt: customer.debt,
+      loyaltyPts: customer.loyaltyPts,
+    },
+    entries,
+    totalSessions: sessions.length,
+    currentDebt: customer.debt,
+    loyaltyPts: customer.loyaltyPts,
+  };
 }

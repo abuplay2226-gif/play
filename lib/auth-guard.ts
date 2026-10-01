@@ -72,17 +72,20 @@ export async function assertAuthorized(allowedRoles: UserRole[]): Promise<Sessio
   return user;
 }
 
-export async function setSignedSessionCookie(payload: SessionPayload): Promise<void> {
+export async function setSignedSessionCookie(payload: SessionPayload, remember = false): Promise<void> {
   const cookieStore = await cookies();
   const serialized = JSON.stringify(payload);
   const signed = sign(serialized);
+
+  // إذا تم اختيار "تذكرني"، تظل الجلسة صالحة لمدة 30 يوماً، وإلا تنتهي خلال 12 ساعة
+  const maxAge = remember ? 60 * 60 * 24 * 30 : 60 * 60 * 12;
 
   cookieStore.set(COOKIE_NAME, signed, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 12,
+    maxAge,
   });
 }
 

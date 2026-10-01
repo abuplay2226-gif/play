@@ -1,6 +1,5 @@
 import Link from "next/link";
-
-import { requireRole } from "@/app/actions/auth";
+import { getCurrentUser, requireRole } from "@/app/actions/auth";
 import {
   createDevice,
   extendSessionDuration,
@@ -11,6 +10,7 @@ import {
   updateDeviceStatus,
 } from "@/app/actions/devices";
 import { CheckoutModal } from "@/components/checkout-modal";
+import { DeviceEditModal } from "@/components/device-edit-modal";
 import { DeviceTimer } from "@/components/device-timer";
 import { OpenSessionModal } from "@/components/open-session-modal";
 import { SiteShell } from "@/components/site-shell";
@@ -19,6 +19,7 @@ import type { DeviceStatus } from "@prisma/client";
 
 export default async function DevicesPage() {
   await requireRole(["ADMIN", "CASHIER", "STAFF"]);
+  const user = await getCurrentUser();
 
   const [devices, openShift, rawCustomers] = await Promise.all([
     getDevices(),
@@ -36,7 +37,7 @@ export default async function DevicesPage() {
   return (
     <SiteShell title="إدارة الأجهزة والجلسات">
       {!openShift && (
-        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200">
+        <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-200 text-xs">
           ⚠️ <strong>تنبيه:</strong> لا توجد وردية مفتوحة حالياً. يرجى{" "}
           <Link href="/shifts" className="font-bold underline text-amber-300">
             فتح وردية من هنا
@@ -45,77 +46,79 @@ export default async function DevicesPage() {
         </div>
       )}
 
-      {/* قسم إضافة جهاز جديد */}
-      <details className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
-        <summary className="cursor-pointer font-bold text-sky-400 select-none">
-          + إضافة جهاز جديد إلى الصالة
-        </summary>
-        <form
-          action={async (formData) => {
-            "use server";
-            const name = String(formData.get("name") ?? "");
-            const type = String(formData.get("type") ?? "PS5") as "PS4" | "PS5" | "PC" | "VIP_ROOM";
-            const singleHourlyRate = Number(formData.get("singleHourlyRate") ?? 0);
-            const multiHourlyRate = Number(formData.get("multiHourlyRate") ?? 0);
+      {/* قسم إضافة جهاز جديد (للمدير) */}
+      {user?.role === "ADMIN" && (
+        <details className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
+          <summary className="cursor-pointer font-bold text-sky-400 text-xs select-none">
+            + إضافة جهاز جديد إلى الصالة
+          </summary>
+          <form
+            action={async (formData) => {
+              "use server";
+              const name = String(formData.get("name") ?? "");
+              const type = String(formData.get("type") ?? "PS5") as "PS4" | "PS5" | "PC" | "VIP_ROOM";
+              const singleHourlyRate = Number(formData.get("singleHourlyRate") ?? 0);
+              const multiHourlyRate = Number(formData.get("multiHourlyRate") ?? 0);
 
-            if (!name) return;
-            await createDevice({ name, type, singleHourlyRate, multiHourlyRate });
-          }}
-          className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-        >
-          <div>
-            <label className="mb-1 block text-xs text-slate-400">اسم الجهاز</label>
-            <input
-              name="name"
-              placeholder="مثال: PS5 - Room 3"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-slate-400">النوع</label>
-            <select
-              name="type"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-            >
-              <option value="PS5">PS5</option>
-              <option value="PS4">PS4</option>
-              <option value="PC">PC</option>
-              <option value="VIP_ROOM">VIP_ROOM</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-slate-400">سعر الفردي (ساعة)</label>
-            <input
-              name="singleHourlyRate"
-              type="number"
-              placeholder="120"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-slate-400">سعر المجموعة (ساعة)</label>
-            <input
-              name="multiHourlyRate"
-              type="number"
-              placeholder="180"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400"
-              required
-            />
-          </div>
-          <div className="sm:col-span-2 lg:col-span-4">
-            <button
-              type="submit"
-              className="w-full rounded-full bg-sky-500 py-2.5 text-sm font-black text-slate-950 hover:bg-sky-400 transition"
-            >
-              حفظ الجهاز
-            </button>
-          </div>
-        </form>
-      </details>
+              if (!name) return;
+              await createDevice({ name, type, singleHourlyRate, multiHourlyRate });
+            }}
+            className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs"
+          >
+            <div>
+              <label className="mb-1 block text-slate-400 font-bold">اسم الجهاز:</label>
+              <input
+                name="name"
+                placeholder="مثال: PS5 - Room 3"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-slate-400 font-bold">النوع:</label>
+              <select
+                name="type"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400 font-bold"
+              >
+                <option value="PS5">PS5</option>
+                <option value="VIP_ROOM">غرفة VIP</option>
+                <option value="PS4">PS4</option>
+                <option value="PC">PC</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-slate-400 font-bold">سعر الفردي / س (ج.م):</label>
+              <input
+                name="singleHourlyRate"
+                type="number"
+                placeholder="120"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-slate-400 font-bold">سعر المجموعة / س (ج.م):</label>
+              <input
+                name="multiHourlyRate"
+                type="number"
+                placeholder="180"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
+                required
+              />
+            </div>
+            <div className="sm:col-span-2 lg:col-span-4">
+              <button
+                type="submit"
+                className="w-full rounded-full bg-sky-500 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-400 transition"
+              >
+                + حفظ الجهاز في الصالة
+              </button>
+            </div>
+          </form>
+        </details>
+      )}
 
-      {/* كروت الأجهزة الاحترافية */}
+      {/* كروت الأجهزة */}
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {devices.map((device) => {
           const activeSession = device.sessions[0] ?? null;
@@ -144,21 +147,35 @@ export default async function DevicesPage() {
               } shadow-xl`}
             >
               <div>
-                {/* رأس الكارت */}
+                {/* رأس الكارت مع زر التعديل والحذف للمدير */}
                 <div className="flex items-center justify-between">
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider ${
-                      isOccupied
-                        ? isPaused
-                          ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                          : "bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse"
-                        : device.status === "MAINTENANCE"
-                          ? "bg-slate-700 text-slate-300"
-                          : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                    }`}
-                  >
-                    {isOccupied ? (isPaused ? "PAUSED" : "PLAYING") : device.status}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider ${
+                        isOccupied
+                          ? isPaused
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                            : "bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse"
+                          : device.status === "MAINTENANCE"
+                            ? "bg-slate-700 text-slate-300"
+                            : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                      }`}
+                    >
+                      {isOccupied ? (isPaused ? "PAUSED" : "PLAYING") : device.status}
+                    </span>
+
+                    {user?.role === "ADMIN" && (
+                      <DeviceEditModal
+                        device={{
+                          id: device.id,
+                          name: device.name,
+                          type: device.type,
+                          singleHourlyRate: device.singleHourlyRate,
+                          multiHourlyRate: device.multiHourlyRate,
+                        }}
+                      />
+                    )}
+                  </div>
 
                   <div className="text-left">
                     <h3 className="text-lg font-black text-white">{device.name}</h3>
@@ -166,7 +183,7 @@ export default async function DevicesPage() {
                   </div>
                 </div>
 
-                {/* كادر العميل */}
+                {/* بيانات العميل */}
                 {isOccupied && (
                   <div className="mt-3 rounded-2xl border border-sky-500/30 bg-sky-950/40 p-2.5 text-xs text-sky-200 flex items-center justify-between">
                     <div>
@@ -199,7 +216,7 @@ export default async function DevicesPage() {
                   </div>
                 </div>
 
-                {/* شاشة العداد الحي التنازلي والتصاعدي */}
+                {/* شاشة العداد الحي */}
                 <div className="mt-3 rounded-2xl bg-slate-950/70 p-4 border border-slate-800/50">
                   {isOccupied && activeSession ? (
                     <div>
@@ -207,7 +224,9 @@ export default async function DevicesPage() {
                         <span className="rounded bg-sky-500/20 px-2 py-0.5 font-bold text-sky-300">
                           وضع: {currentSlotType === "MULTI" ? "مجموعة (زوجي)" : "فردي"}
                         </span>
-                        <span className="text-slate-400">{currentRate} ج.م / ساعة</span>
+                        <span className="text-slate-400 font-mono">
+                          {activeSession.fixedDuration === -999 ? "مدفوع بالباقة ✨" : `${currentRate} ج.م / س`}
+                        </span>
                       </div>
                       <DeviceTimer
                         startTime={activeSlot?.startTime ?? activeSession.startTime}
@@ -278,13 +297,12 @@ export default async function DevicesPage() {
                       </form>
                     </div>
 
-                    {/* زر تمديد الوقت للجلسات المحددة إذا طلب العميل وقتاً إضافياً */}
                     {plannedMinutes && (
                       <div className="grid grid-cols-2 gap-2">
                         <form
                           action={async () => {
                             "use server";
-                            await extendSessionDuration(activeSession.id, 60); // تمديد ساعة
+                            await extendSessionDuration(activeSession.id, 60);
                           }}
                         >
                           <button
@@ -298,20 +316,19 @@ export default async function DevicesPage() {
                         <form
                           action={async () => {
                             "use server";
-                            await extendSessionDuration(activeSession.id, null); // تحويل لمفتوح
+                            await extendSessionDuration(activeSession.id, null);
                           }}
                         >
                           <button
                             type="submit"
                             className="w-full rounded-xl border border-sky-500/30 bg-sky-500/10 py-1.5 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20 transition"
                           >
-                            تحويل لوقت مفتوح ♾️
+                            تحويل لمفتوح ♾️
                           </button>
                         </form>
                       </div>
                     )}
 
-                    {/* زر المحاسبة والفوترة */}
                     <CheckoutModal
                       sessionId={activeSession.id}
                       deviceName={device.name}
@@ -340,7 +357,7 @@ export default async function DevicesPage() {
                       </button>
                     )}
 
-                    {/* تغيير الحالة يدوياً */}
+                    {/* تبديل الحالة متاح/صيانة */}
                     <form
                       action={async (formData) => {
                         "use server";
@@ -370,6 +387,17 @@ export default async function DevicesPage() {
             </article>
           );
         })}
+
+        {/* شاشة توضيحية عندما تكون الصالة خالية من الأجهزة */}
+        {devices.length === 0 && (
+          <div className="col-span-full rounded-3xl border border-dashed border-slate-800 p-12 text-center text-slate-500">
+            <span className="text-4xl block mb-2">🎮</span>
+            <p className="text-base font-bold text-white">لا توجد أجهزة مسجلة في الصالة حالياً</p>
+            <p className="text-xs text-slate-400 mt-1">
+              استخدم نموذج &quot;+ إضافة جهاز جديد إلى الصالة&quot; بالأعلى لإضافة أول جهاز وضبط أسعاره.
+            </p>
+          </div>
+        )}
       </div>
     </SiteShell>
   );
