@@ -11,14 +11,15 @@ const navItems = [
   { label: "البطولات", href: "/tournaments", icon: "🏆" },
   { label: "نقاط البيع", href: "/pos", icon: "☕" },
   { label: "الورديات", href: "/shifts", icon: "⏱️" },
+  { label: "الخزائن والسندات", href: "/cash-drawers", icon: "🏦" }, // تمت إعادتها هنا
+  { label: "الحسابات المالية", href: "/financial", icon: "💵" },
+  { label: "التقارير", href: "/reports", icon: "📊" },
   { label: "الحجوزات", href: "/bookings", icon: "📅" },
   { label: "المخزون", href: "/inventory", icon: "📦" },
   { label: "الموردون", href: "/suppliers", icon: "🚚" },
   { label: "العملاء", href: "/customers", icon: "👤" },
   { label: "الباقات", href: "/packages", icon: "🎁" },
   { label: "الموظفون", href: "/users", icon: "👔" },
-  { label: "الحسابات المالية", href: "/financial", icon: "💵" },
-  { label: "التقارير", href: "/reports", icon: "📊" },
   { label: "الفاتورة", href: "/receipt", icon: "🧾" },
 ];
 
@@ -186,8 +187,8 @@ export function SiteShell({
         {[
           { label: "الأجهزة", href: "/devices", icon: "🎮" },
           { label: "الكافيه", href: "/pos", icon: "☕" },
+          { label: "الخزائن", href: "/cash-drawers", icon: "🏦" },
           { label: "البطولات", href: "/tournaments", icon: "🏆" },
-          { label: "الحسابات", href: "/financial", icon: "💵" },
         ].map((tab) => {
           const isActive = pathname === tab.href;
           return (
