@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { requireRole } from "@/app/actions/auth";
 import { createOrder } from "@/app/actions/pos";
+import { QuickSaleButton } from "@/components/quick-sale-button";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SiteShell } from "@/components/site-shell";
 import { prisma } from "@/lib/prisma";
@@ -9,12 +10,13 @@ import { prisma } from "@/lib/prisma";
 export default async function PosPage() {
   await requireRole(["ADMIN", "CASHIER", "STAFF"]);
 
-  const [categories, products, activeSessions, openShift] = await Promise.all([
+  const [categories, products, activeSessions, openShift, cashDrawers] = await Promise.all([
     prisma.category.findMany({
       include: { products: true },
       orderBy: { name: "asc" },
     }),
     prisma.product.findMany({
+      where: { isRawMaterial: false },
       include: { category: true },
       orderBy: { name: "asc" },
     }),
@@ -27,9 +29,9 @@ export default async function PosPage() {
       where: { status: "OPEN" },
       include: { cashDrawer: true },
     }),
+    prisma.cashDrawer.findMany({ orderBy: { name: "asc" } }),
   ]);
 
-  // تجهيز الخيارات لمكونات البحث الحي
   const deviceOptions = activeSessions.map((s) => ({
     value: s.id,
     label: `🎮 ${s.device.name}`,
@@ -57,13 +59,13 @@ export default async function PosPage() {
         </div>
       ) : (
         <div className="grid gap-6 xl:grid-cols-[1.5fr_0.9fr]">
-          {/* قسم المنتجات والبيع السريع */}
+          {/* قسم المنتجات والبيع السريع مع التأكيد واختيار الخزينة */}
           <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-bold text-white">قائمة منتجات الكافيه</h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  الخزينة المودع بها الكاش:{" "}
+                  الخزينة الافتراضية للوردية:{" "}
                   <span className="text-emerald-400 font-bold">{openShift.cashDrawer.name}</span>
                 </p>
               </div>
@@ -100,25 +102,19 @@ export default async function PosPage() {
                     </div>
                   </div>
 
-                  <form
-                    action={async () => {
-                      "use server";
-                      await createOrder({
-                        shiftId: openShift.id,
-                        paymentMethod: "CASH",
-                        items: [{ productId: item.id, quantity: 1 }],
-                      });
-                    }}
-                    className="mt-4"
-                  >
-                    <button
-                      type="submit"
-                      disabled={item.stockQuantity <= 0}
-                      className="w-full rounded-xl bg-sky-500 py-2 text-xs font-black text-slate-950 transition hover:bg-sky-400 disabled:opacity-40"
-                    >
-                      {item.stockQuantity > 0 ? "بيع سريع (كاش)" : "نفذ المخزون"}
-                    </button>
-                  </form>
+                  <div className="mt-4">
+                    <QuickSaleButton
+                      product={{
+                        id: item.id,
+                        name: item.name,
+                        sellPrice: item.sellPrice,
+                        stockQuantity: item.stockQuantity,
+                      }}
+                      shiftId={openShift.id}
+                      cashDrawers={cashDrawers}
+                      defaultDrawerId={openShift.cashDrawerId}
+                    />
+                  </div>
                 </article>
               ))}
             </div>
@@ -127,7 +123,7 @@ export default async function PosPage() {
           {/* قسم إضافة الطلب على جهاز نشط مع البحث الحي */}
           <aside className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 h-fit">
             <h2 className="text-xl font-bold text-white">إضافة طلب لحساب جهاز</h2>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="text-xs text-slate-400">
               تنزيل المشاريب على الجلسة ليتم دفعها مجمعة مع وقت اللعب عند الانتهاء.
             </p>
 

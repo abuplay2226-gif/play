@@ -13,6 +13,7 @@ import { CheckoutModal } from "@/components/checkout-modal";
 import { DeviceEditModal } from "@/components/device-edit-modal";
 import { DeviceTimer } from "@/components/device-timer";
 import { OpenSessionModal } from "@/components/open-session-modal";
+import { SearchableSelect } from "@/components/searchable-select";
 import { SiteShell } from "@/components/site-shell";
 import { prisma } from "@/lib/prisma";
 import type { DeviceStatus } from "@prisma/client";
@@ -34,6 +35,16 @@ export default async function DevicesPage() {
     loyaltyPts: c.loyaltyPts,
   }));
 
+  // استخراج الأنواع المسجلة حالياً في الصالة مع دمج الأنواع الافتراضية
+  const defaultTypes = ["PS5", "PS4", "غرفة VIP", "PC", "VR", "Xbox"];
+  const existingTypesFromDb = devices.map((d) => d.type);
+  const allUniqueTypes = Array.from(new Set([...defaultTypes, ...existingTypesFromDb]));
+
+  const deviceTypeOptions = allUniqueTypes.map((t) => ({
+    value: t,
+    label: t,
+  }));
+
   return (
     <SiteShell title="إدارة الأجهزة والجلسات">
       {!openShift && (
@@ -46,72 +57,83 @@ export default async function DevicesPage() {
         </div>
       )}
 
-      {/* قسم إضافة جهاز جديد (للمدير) */}
+      {/* قسم إضافة جهاز جديد (للمدير) مع إمكانية ابتكار أي نوع جديد */}
       {user?.role === "ADMIN" && (
         <details className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
           <summary className="cursor-pointer font-bold text-sky-400 text-xs select-none">
-            + إضافة جهاز جديد إلى الصالة
+            + إضافة جهاز جديد إلى الصالة (يدعم أي نوع أو إصدار مستقبلي)
           </summary>
           <form
             action={async (formData) => {
               "use server";
-              const name = String(formData.get("name") ?? "");
-              const type = String(formData.get("type") ?? "PS5") as "PS4" | "PS5" | "PC" | "VIP_ROOM";
+              const name = String(formData.get("name") ?? "").trim();
+              const rawType = String(formData.get("type") ?? "PS5").trim();
               const singleHourlyRate = Number(formData.get("singleHourlyRate") ?? 0);
               const multiHourlyRate = Number(formData.get("multiHourlyRate") ?? 0);
 
-              if (!name) return;
+              // تنظيف الاسم إن كان نوعاً جديداً مدخلاً لايف
+              const type = rawType.startsWith("NEW:") ? rawType.replace("NEW:", "").trim() : rawType;
+
+              if (!name || !type) return;
               await createDevice({ name, type, singleHourlyRate, multiHourlyRate });
             }}
-            className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs"
+            className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs items-end"
           >
             <div>
               <label className="mb-1 block text-slate-400 font-bold">اسم الجهاز:</label>
               <input
                 name="name"
-                placeholder="مثال: PS5 - Room 3"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
+                placeholder="مثال: PS5 - Room 3 / طاولة VR 1"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white outline-none focus:border-sky-400"
                 required
               />
             </div>
+
+            {/* نوع الجهاز مع البحث الحي وإمكانية كتابة أي نوع جديد */}
             <div>
-              <label className="mb-1 block text-slate-400 font-bold">النوع:</label>
-              <select
+              <label className="mb-1 block text-slate-400 font-bold">
+                نوع الجهاز: (اختر أو اكتب نوعاً جديداً)
+              </label>
+              <SearchableSelect
                 name="type"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400 font-bold"
-              >
-                <option value="PS5">PS5</option>
-                <option value="VIP_ROOM">غرفة VIP</option>
-                <option value="PS4">PS4</option>
-                <option value="PC">PC</option>
-              </select>
+                options={deviceTypeOptions}
+                placeholder="-- اختر النوع أو اكتب جديداً --"
+                searchPlaceholder="اختر أو اكتب (مثلاً: PS6, VR, بلياردو)..."
+                emptyText="نوع غير موجود - اضغط بالزر لإضافته"
+                allowCreate={true}
+                createLabel="كنوع جهاز جديد"
+                required
+              />
             </div>
+
             <div>
               <label className="mb-1 block text-slate-400 font-bold">سعر الفردي / س (ج.م):</label>
               <input
                 name="singleHourlyRate"
                 type="number"
                 placeholder="120"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
                 required
               />
             </div>
+
             <div>
               <label className="mb-1 block text-slate-400 font-bold">سعر المجموعة / س (ج.م):</label>
               <input
                 name="multiHourlyRate"
                 type="number"
                 placeholder="180"
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
+                className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
                 required
               />
             </div>
+
             <div className="sm:col-span-2 lg:col-span-4">
               <button
                 type="submit"
-                className="w-full rounded-full bg-sky-500 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-400 transition"
+                className="w-full rounded-full bg-sky-500 py-3 text-xs font-black text-slate-950 hover:bg-sky-400 transition shadow-lg shadow-sky-950/20"
               >
-                + حفظ الجهاز في الصالة
+                + حفظ الجهاز وضمه لأجهزة الصالة
               </button>
             </div>
           </form>
@@ -147,7 +169,7 @@ export default async function DevicesPage() {
               } shadow-xl`}
             >
               <div>
-                {/* رأس الكارت مع زر التعديل والحذف للمدير */}
+                {/* رأس الكارت مع إمكانية التعديل للمدير */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span
@@ -179,7 +201,9 @@ export default async function DevicesPage() {
 
                   <div className="text-left">
                     <h3 className="text-lg font-black text-white">{device.name}</h3>
-                    <p className="text-[11px] text-slate-400">{device.type}</p>
+                    <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-sky-300">
+                      {device.type}
+                    </span>
                   </div>
                 </div>
 
@@ -357,7 +381,6 @@ export default async function DevicesPage() {
                       </button>
                     )}
 
-                    {/* تبديل الحالة متاح/صيانة */}
                     <form
                       action={async (formData) => {
                         "use server";
@@ -387,17 +410,6 @@ export default async function DevicesPage() {
             </article>
           );
         })}
-
-        {/* شاشة توضيحية عندما تكون الصالة خالية من الأجهزة */}
-        {devices.length === 0 && (
-          <div className="col-span-full rounded-3xl border border-dashed border-slate-800 p-12 text-center text-slate-500">
-            <span className="text-4xl block mb-2">🎮</span>
-            <p className="text-base font-bold text-white">لا توجد أجهزة مسجلة في الصالة حالياً</p>
-            <p className="text-xs text-slate-400 mt-1">
-              استخدم نموذج &quot;+ إضافة جهاز جديد إلى الصالة&quot; بالأعلى لإضافة أول جهاز وضبط أسعاره.
-            </p>
-          </div>
-        )}
       </div>
     </SiteShell>
   );

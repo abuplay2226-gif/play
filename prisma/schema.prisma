@@ -23,6 +23,8 @@ enum DeviceType {
   PS5
   PC
   VIP_ROOM
+  VR
+  XBOX
 }
 
 enum DeviceStatus {
@@ -162,7 +164,7 @@ model FinancialTransaction {
 model Device {
   id               String          @id @default(uuid())
   name             String
-  type             DeviceType
+  type             String          // نوع الجهاز مرن كنص حر (يقبل PS5, PS6, VR, Xbox, بلياردو، أو أي جهاز جديد)
   singleHourlyRate Float
   multiHourlyRate  Float
   status           DeviceStatus    @default(AVAILABLE)
@@ -185,7 +187,7 @@ model DeviceSession {
   totalCost      Float         @default(0.0)
   isFixedTime    Boolean       @default(false)
   fixedDuration  Int?
-  plannedMinutes Int?
+  plannedMinutes Int?          // مدة الجلسة بالدقائق للعداد التنازلي
   slots          TimeSlot[]
   orders         Order[]
 }
@@ -219,10 +221,10 @@ model Product {
   barcode         String?        @unique
   sellPrice       Float
   costPrice       Float          @default(0.0)
-  stockQuantity   Float          @default(0.0)
+  stockQuantity   Float          @default(0.0) // Float لدعم الكسور بالجرام أو الكيلو
   minStockAlert   Float          @default(5.0)
-  isRawMaterial   Boolean        @default(false)
-  unit            String         @default("قطعة")
+  isRawMaterial   Boolean        @default(false) // هل هي مادة خام أم منتج للبيع
+  unit            String         @default("قطعة") // جرام، ملي، قطعة، كيلو
   orderItems      OrderItem[]
   purchaseItems   PurchaseItem[]
   recipeItems     RecipeItem[]   @relation("RecipeProduct")
@@ -233,7 +235,7 @@ model RecipeItem {
   id           String  @id @default(uuid())
   productId    String
   ingredientId String
-  quantity     Float   @default(1.0)
+  quantity     Float   @default(1.0) // الكمية المستهلكة لكل فنجان/كوب
 
   product    Product @relation("RecipeProduct", fields: [productId], references: [id], onDelete: Cascade)
   ingredient Product @relation("RecipeIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
@@ -275,7 +277,7 @@ model Supplier {
   id        String            @id @default(uuid())
   name      String
   phone     String?
-  balance   Float             @default(0.0)
+  balance   Float             @default(0.0) // رصيد المورد (له دائن أو عليه مدين)
   purchases PurchaseInvoice[]
 }
 
@@ -295,7 +297,7 @@ model PurchaseItem {
   productId String
   invoice   PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   product   Product         @relation(fields: [productId], references: [id])
-  quantity  Float
+  quantity  Float           // Float لدعم شراء خامات بالوزن أو الحجم
   unitCost  Float
 }
 
@@ -304,14 +306,14 @@ model PurchaseItem {
 // -------------------------------------------------------------
 
 model Customer {
-  id                      String                  @id @default(uuid())
-  name                    String
-  phone                   String                  @unique
-  loyaltyPts              Int                     @default(0)
-  debt                    Float                   @default(0.0)
-  sessions                DeviceSession[]
-  bookings                Booking[]
-  notifications           Notification[]
+  id                       String                  @id @default(uuid())
+  name                     String
+  phone                    String                  @unique
+  loyaltyPts               Int                     @default(0)
+  debt                     Float                   @default(0.0)
+  sessions                 DeviceSession[]
+  bookings                 Booking[]
+  notifications            Notification[]
   tournamentParticipations TournamentParticipant[]
 }
 

@@ -78,10 +78,12 @@ export async function createProduct(input: {
   return product;
 }
 
+// إنشاء الطلب مع دعم تحديد الخزينة التي يورد إليها الكاش (targetCashDrawerId)
 export async function createOrder(input: {
   shiftId: string;
   sessionId?: string | null;
   paymentMethod?: PaymentMethod;
+  targetCashDrawerId?: string; // الخزينة المحددة لتوريد النقدية
   items: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>;
 }) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
@@ -174,25 +176,30 @@ export async function createOrder(input: {
       },
     });
 
-    if (orderStatus === "PAID" && finalPaymentMethod === "CASH" && shift.cashDrawerId) {
+    // 4. توريد الكاش للخزينة المختارة أو خزينة الوردية كخيار افتراضي
+    const finalDrawerId = input.targetCashDrawerId || shift.cashDrawerId;
+
+    if (orderStatus === "PAID" && finalPaymentMethod === "CASH" && finalDrawerId) {
       await tx.cashDrawer.update({
-        where: { id: shift.cashDrawerId },
+        where: { id: finalDrawerId },
         data: { balance: { increment: totalAmount } },
       });
 
       await tx.financialTransaction.create({
         data: {
-          cashDrawerId: shift.cashDrawerId,
+          cashDrawerId: finalDrawerId,
           shiftId: input.shiftId,
           type: "INCOME",
           amount: totalAmount,
-          description: `مبيعات كافيه - طلب #${createdOrder.id.slice(-6)}`,
+          description: `مبيعات كافيه (كاش سريع) - طلب #${createdOrder.id.slice(-6)}`,
         },
       });
     }
 
     revalidatePath("/pos");
     revalidatePath("/inventory");
+    revalidatePath("/shifts");
+    revalidatePath("/cash-drawers");
     return createdOrder;
   });
 }
@@ -240,6 +247,7 @@ export async function cancelOrder(orderId: string) {
 
     revalidatePath("/pos");
     revalidatePath("/inventory");
+    revalidatePath("/shifts");
     return cancelled;
   });
 }

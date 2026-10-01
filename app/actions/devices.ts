@@ -66,23 +66,24 @@ export async function getActiveSessions() {
   });
 }
 
-// 1. إنشاء جهاز جديد
+// 1. إنشاء جهاز جديد (يقبل أي نوع نصي جديد: PS5, PS6, VR, Xbox, بلياردو...)
 export async function createDevice(input: {
   name: string;
-  type: "PS4" | "PS5" | "PC" | "VIP_ROOM";
+  type: string;
   singleHourlyRate: number;
   multiHourlyRate: number;
   status?: DeviceStatus;
 }) {
   await assertAuthorized(["ADMIN"]);
   const name = input.name.trim();
+  const type = input.type.trim();
 
-  if (!name) throw new Error("اسم الجهاز مطلوب");
+  if (!name || !type) throw new Error("اسم الجهاز ونوعه مطلوبان");
 
   const device = await prisma.device.create({
     data: {
       name,
-      type: input.type,
+      type,
       singleHourlyRate: toNumber(input.singleHourlyRate),
       multiHourlyRate: toNumber(input.multiHourlyRate),
       status: input.status ?? "AVAILABLE",
@@ -94,26 +95,27 @@ export async function createDevice(input: {
   return device;
 }
 
-// 2. تعديل بيانات الجهاز والأسعار
+// 2. تعديل بيانات الجهاز والنوع بحرية تامة
 export async function updateDevice(input: {
   deviceId: string;
   name: string;
-  type: "PS4" | "PS5" | "PC" | "VIP_ROOM";
+  type: string;
   singleHourlyRate: number;
   multiHourlyRate: number;
 }) {
   await assertAuthorized(["ADMIN"]);
 
   const name = input.name.trim();
-  if (!input.deviceId || !name) {
-    throw new Error("معرف الجهاز واسمه مطلوبان");
+  const type = input.type.trim();
+  if (!input.deviceId || !name || !type) {
+    throw new Error("معرف الجهاز واسمه ونوعه حقول مطلوبة");
   }
 
   const updated = await prisma.device.update({
     where: { id: input.deviceId },
     data: {
       name,
-      type: input.type,
+      type,
       singleHourlyRate: toNumber(input.singleHourlyRate),
       multiHourlyRate: toNumber(input.multiHourlyRate),
     },
@@ -130,7 +132,6 @@ export async function deleteDevice(deviceId: string) {
 
   if (!deviceId) throw new Error("معرف الجهاز مطلوب");
 
-  // التحقق من عدم وجود جلسات نشطة حالياً على الجهاز
   const activeSession = await prisma.deviceSession.findFirst({
     where: {
       deviceId,
@@ -142,7 +143,6 @@ export async function deleteDevice(deviceId: string) {
     throw new Error("لا يمكن حذف الجهاز أثناء وجود جلسة لعب نشطة عليه، يرجى إنهاء الجلسة أولاً");
   }
 
-  // حذف سجلات الجلسات المنتهية القديمة المرتبطة به إن وجدت ثم حذف الجهاز
   await prisma.device.delete({
     where: { id: deviceId },
   });
