@@ -189,7 +189,7 @@ export default async function CustomersPage() {
                 لا يوجد عملاء مسجلين حالياً.
               </p>
             )}
-          <
+          </div>
         </div>
       </div>
     </SiteShell>
