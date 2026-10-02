@@ -33,7 +33,6 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
       setDiscount(0);
       setPaidAmount(preview.roundedTotal);
       setCashPortion(preview.roundedTotal);
-      // ضبط الخزينة الافتراضية على خزينة الوردية تلقائياً
       setSelectedDrawerId(preview.defaultCashDrawerId);
     } catch (err: any) {
       setErrorMessage(err.message || "فشل تحميل تفاصيل الفاتورة");
@@ -72,7 +71,7 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
           paidAmount,
           paymentMethod,
           cashPortion: paymentMethod === "MIXED" ? cashPortion : undefined,
-          targetCashDrawerId: selectedDrawerId, // تمرير الخزينة المحددة
+          targetCashDrawerId: selectedDrawerId,
         });
 
         setIsOpen(false);
@@ -84,6 +83,10 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
       }
     });
   };
+
+  // تسميات فردي/جماعي أو ساعة/جيم للبلياردو
+  const singleLabel = data?.isBilliard ? "اللعب بالساعة" : "اللعب الفردي";
+  const multiLabel = data?.isBilliard ? "اللعب بالجيم" : "اللعب الجماعي (زوجي)";
 
   return (
     <>
@@ -134,19 +137,86 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
                   </div>
                 )}
 
-                {/* تفاصيل الوقت والطلبات */}
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-2xl bg-slate-950/70 p-3 border border-slate-800 space-y-1">
-                    <span className="text-slate-400">وقت اللعب ({data.durationText}):</span>
-                    <p className="font-mono text-base font-bold text-sky-400">{data.totalTimeCost} ج.م</p>
+                {/* تفصيل وقت اللعب (فردي وجماعي / ساعة وجيم) */}
+                <div className="rounded-2xl bg-slate-950/70 p-3.5 border border-slate-800 space-y-2.5">
+                  <div className="flex justify-between items-center text-xs border-b border-slate-800/80 pb-2">
+                    <span className="font-bold text-sky-300 flex items-center gap-1.5">
+                      <span>⏱️</span>
+                      <span>تفاصيل وقت اللعب (إجمالي: {data.durationText})</span>
+                    </span>
+                    <span className="font-mono font-bold text-white text-sm">
+                      {data.totalTimeCost} ج.م
+                    </span>
                   </div>
-                  <div className="rounded-2xl bg-slate-950/70 p-3 border border-slate-800 space-y-1">
-                    <span className="text-slate-400">مشاريب وطلبات ({data.orderItems.length}):</span>
-                    <p className="font-mono text-base font-bold text-amber-400">{data.ordersTotal} ج.م</p>
-                  </div>
+
+                  {/* إذا تم التبديل أثناء الجلسة يتم إظهار كل مدة وتكلفتها بوضوح */}
+                  {data.hasSwitchedModes ? (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex justify-between items-center text-xs bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800">
+                        <span className="text-slate-300">
+                          {data.isBilliard ? "🎱" : "👤"} {singleLabel} ({data.singleDurationText}):
+                        </span>
+                        <span className="font-mono font-bold text-emerald-400">
+                          {data.singleCost} ج.م
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center text-xs bg-slate-900/80 px-3 py-2 rounded-xl border border-slate-800">
+                        <span className="text-slate-300">
+                          {data.isBilliard ? "🎯" : "👥"} {multiLabel} ({data.multiDurationText}):
+                        </span>
+                        <span className="font-mono font-bold text-indigo-400">
+                          {data.multiCost} ج.م
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* إذا كانت الجلسة بوضع واحد فقط */
+                    <div className="flex justify-between items-center text-xs text-slate-300 pt-1">
+                      <span>
+                        نظام الجلسة:{" "}
+                        <strong className="text-emerald-400">
+                          {data.singleMinutes > 0 ? singleLabel : multiLabel}
+                        </strong>
+                      </span>
+                      <span className="text-slate-400">
+                        {data.singleMinutes > 0 ? data.singleDurationText : data.multiDurationText}
+                      </span>
+                    </div>
+                  )}
+
+                  {data.isPackageSession && (
+                    <p className="text-[11px] text-cyan-300 font-bold bg-cyan-950/40 p-2 rounded-lg border border-cyan-800/50">
+                      ✨ تم خصم الوقت من رصيد باقة العميل المسبقة
+                    </p>
+                  )}
                 </div>
 
-                {/* الخصم وجبر الكسور لأقرب 5 */}
+                {/* طلبات ومشاريب الكافيه */}
+                {data.orderItems.length > 0 && (
+                  <div className="rounded-2xl bg-slate-950/70 p-3.5 border border-slate-800 space-y-2">
+                    <div className="flex justify-between items-center text-xs border-b border-slate-800/80 pb-2">
+                      <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                        <span>☕</span>
+                        <span>مشاريب وطلبات الكافيه ({data.orderItems.length})</span>
+                      </span>
+                      <span className="font-mono font-bold text-amber-400 text-sm">
+                        {data.ordersTotal} ج.م
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                      {data.orderItems.map((item: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-xs text-slate-300">
+                          <span>{item.name} × {item.quantity}</span>
+                          <span className="font-mono text-slate-400">{item.subTotal.toFixed(2)} ج.م</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* الحساب النهائي والخصم والتقريب لأقرب 5 */}
                 <div className="rounded-2xl bg-slate-950/50 p-4 border border-slate-800 space-y-3">
                   <div className="flex justify-between items-center text-xs text-slate-300">
                     <span>المجموع الفعلي قبل التقريب:</span>
@@ -180,11 +250,11 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
                   </div>
                 </div>
 
-                {/* تحديد الخزينة (مع افتراض خزينة الوردية) */}
+                {/* تحديد الخزينة */}
                 {paymentMethod !== "CARD" && paymentMethod !== "DEBT" && (
                   <div className="rounded-2xl bg-slate-950/60 p-3 border border-slate-800">
                     <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                      🏦 توريد النقدية إلى الخزينة:
+                      🏦 الخزينة المورد إليها الكاش:
                     </label>
                     <select
                       value={selectedDrawerId}
@@ -226,7 +296,7 @@ export function CheckoutModal({ sessionId, deviceName }: CheckoutModalProps) {
                   </div>
                 </div>
 
-                {/* حقول الدفع النقدي والآجل */}
+                {/* حقول المدفوع والمتبقي */}
                 <div className="rounded-2xl bg-slate-950/60 p-3 border border-slate-800 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-300 font-bold">المبلغ المدفوع كاش الآن:</span>

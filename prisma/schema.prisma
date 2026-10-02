@@ -106,22 +106,30 @@ enum MatchStatus {
 // -------------------------------------------------------------
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  password      String?
-  name          String
-  role          Role           @default(CASHIER)
-  createdAt     DateTime       @default(now())
-  shifts        Shift[]
-  notifications Notification[]
+  id                  String         @id @default(uuid())
+  email               String         @unique
+  password            String?
+  name                String
+  role                Role           @default(CASHIER)
+  createdAt           DateTime       @default(now())
+
+  // الخزينة الافتراضية المخصصة للموظف
+  defaultCashDrawerId String?
+  defaultCashDrawer   CashDrawer?    @relation("UserDefaultDrawer", fields: [defaultCashDrawerId], references: [id])
+
+  shifts              Shift[]
+  notifications       Notification[]
 }
 
 model CashDrawer {
-  id           String                 @id @default(uuid())
-  name         String
-  balance      Float                  @default(0.0)
-  shifts       Shift[]
-  transactions FinancialTransaction[]
+  id            String                 @id @default(uuid())
+  name          String
+  balance       Float                  @default(0.0)
+  shifts        Shift[]
+  transactions  FinancialTransaction[]
+
+  // الموظفون المربوطون بهذه الخزينة افتراضياً
+  assignedUsers User[]                 @relation("UserDefaultDrawer")
 }
 
 model Shift {

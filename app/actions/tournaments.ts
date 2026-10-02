@@ -77,7 +77,7 @@ export async function createTournament(input: {
   type: TournamentType;
   defaultMatchesPerPlayer?: number;
 }) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const title = input.title.trim();
   const gameName = input.gameName.trim();
@@ -107,7 +107,7 @@ export async function registerTournamentParticipant(input: {
   teamName?: string;
   targetMatches?: number;
 }) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const tournament = await (prisma as any).tournament.findUnique({
     where: { id: input.tournamentId },
@@ -145,7 +145,7 @@ export async function registerTournamentParticipant(input: {
       goalsFor: 0,
       goalsAgainst: 0,
       goalDiff: 0,
-      isQualified: tournament?.type === "KNOCKOUT", // في الكأس يتأهل الجميع للقرعة مباشرة
+      isQualified: tournament?.type === "KNOCKOUT",
     },
   });
 
@@ -154,7 +154,7 @@ export async function registerTournamentParticipant(input: {
 }
 
 export async function updateParticipantMatchesCount(participantId: string, targetMatches: number) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const current = await (prisma as any).tournamentParticipant.findUnique({
     where: { id: participantId },
@@ -175,7 +175,7 @@ export async function updateParticipantMatchesCount(participantId: string, targe
 }
 
 export async function deleteTournamentParticipant(participantId: string) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const deleted = await (prisma as any).tournamentParticipant.delete({
     where: { id: participantId },
@@ -187,7 +187,7 @@ export async function deleteTournamentParticipant(participantId: string) {
 
 // 1. القرعة العشوائية لمباريات الدوري العام
 export async function generateLeagueDraw(tournamentId: string) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   return await prisma.$transaction(async (tx: any) => {
     const tournament = await tx.tournament.findUnique({
@@ -284,7 +284,7 @@ export async function generateLeagueDraw(tournamentId: string) {
 
 // 2. القرعة العشوائية المباشرة لبطولة الكأس (الدور الأول) أو المتأهلين من الدوري
 export async function generateKnockoutDraw(tournamentId: string) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   return await prisma.$transaction(async (tx: any) => {
     const tournament = await tx.tournament.findUnique({
@@ -296,8 +296,6 @@ export async function generateKnockoutDraw(tournamentId: string) {
 
     if (!tournament) throw new Error("البطولة غير موجودة");
 
-    // إذا كانت بطولة دوري، نأخذ فقط المؤهلين (isQualified)
-    // إذا كانت بطولة كأس، نأخذ جميع المشاركين
     const pool = tournament.type === "KNOCKOUT"
       ? tournament.participants
       : tournament.participants.filter((p: any) => p.isQualified);
@@ -306,7 +304,6 @@ export async function generateKnockoutDraw(tournamentId: string) {
       throw new Error("يجب توفر لاعبين اثنين على الأقل لإجراء قرعة خروج المغلوب");
     }
 
-    // حذف أي مباريات إقصائية سابقة لإعادة القرعة
     await tx.tournamentMatch.deleteMany({
       where: { tournamentId, stage: { not: "GROUP" } },
     });
@@ -345,7 +342,7 @@ export async function generateKnockoutDraw(tournamentId: string) {
 
 // 3. إجراء قرعة الدور التالي للفائزين فقط + توليد مباراة المركز الثالث عند نصف النهائي
 export async function advanceKnockoutNextRound(tournamentId: string) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   return await prisma.$transaction(async (tx: any) => {
     const tournament = await tx.tournament.findUnique({
@@ -360,11 +357,9 @@ export async function advanceKnockoutNextRound(tournamentId: string) {
 
     if (!tournament) throw new Error("البطولة غير موجودة");
 
-    // استنتاج الدور الحالي النشط
     const stagesOrder: MatchStage[] = ["ROUND_OF_16", "QUARTER_FINAL", "SEMI_FINAL", "FINAL"];
     const currentMatches = tournament.matches;
 
-    // البحث عن أحدث دور موجود
     let latestStage: MatchStage | null = null;
     for (const st of stagesOrder) {
       if (currentMatches.some((m: any) => m.stage === st)) {
@@ -383,9 +378,8 @@ export async function advanceKnockoutNextRound(tournamentId: string) {
 
     const winnerIds = matchesOfCurrentStage.map((m: any) => m.winnerId);
 
-    // إذا كان الدور الحالي هو نصف النهائي (SEMI_FINAL) -> نولد النهائي + مباراة المركز الثالث
     if (latestStage === "SEMI_FINAL") {
-      // 1. مباراة النهائي بين الفائزين الاثنين
+      // مباراة النهائي
       await tx.tournamentMatch.create({
         data: {
           tournamentId,
@@ -398,7 +392,7 @@ export async function advanceKnockoutNextRound(tournamentId: string) {
         },
       });
 
-      // 2. مباراة تحديد المركز الثالث بين الخاسرين
+      // مباراة المركز الثالث
       const loserIds = matchesOfCurrentStage.map((m: any) =>
         m.player1Id === m.winnerId ? m.player2Id : m.player1Id
       );
@@ -450,7 +444,7 @@ export async function recordMatchScore(input: {
   player2Score: number;
   winnerId?: string;
 }) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   return await prisma.$transaction(async (tx: any) => {
     const match = await tx.tournamentMatch.findUnique({
@@ -547,7 +541,7 @@ export async function recordMatchScore(input: {
 }
 
 export async function toggleParticipantQualification(participantId: string, isQualified: boolean) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   const updated = await (prisma as any).tournamentParticipant.update({
     where: { id: participantId },

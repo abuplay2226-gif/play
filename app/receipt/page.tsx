@@ -1,5 +1,6 @@
 import { ReceiptPrintButton } from "@/components/receipt-print-button";
 import { SiteShell } from "@/components/site-shell";
+import { isBilliardDevice } from "@/lib/device-utils";
 import { prisma } from "@/lib/prisma";
 
 export default async function ReceiptPage({
@@ -18,6 +19,7 @@ export default async function ReceiptPage({
   let deviceName = "";
   let durationText = "";
   let timeCost = 0;
+  let timeBreakdown: Array<{ label: string; duration: string; cost: string }> = [];
   let ordersList: Array<{ name: string; qty: number; total: string }> = [];
   let subTotal = 0;
   let finalTotal = 0;
@@ -28,6 +30,7 @@ export default async function ReceiptPage({
       include: {
         device: true,
         customer: true,
+        slots: { orderBy: { startTime: "asc" } },
         shift: { include: { user: true } },
         orders: {
           where: { status: { not: "CANCELLED" } },
@@ -44,6 +47,8 @@ export default async function ReceiptPage({
       timeCost = session.timeCost;
       finalTotal = session.totalCost;
 
+      const isBilliard = isBilliardDevice(session.device.type);
+
       if (session.customer) {
         customerName = session.customer.name;
         customerPhone = session.customer.phone;
@@ -53,6 +58,42 @@ export default async function ReceiptPage({
       const diffMs = (session.endTime ?? new Date()).getTime() - session.startTime.getTime();
       const mins = Math.max(0, Math.floor(diffMs / 60000));
       durationText = `${Math.floor(mins / 60)} س و ${mins % 60} د`;
+
+      // حساب أوقات الفردي والجماعي المنفصلة
+      let singleMins = 0;
+      let singleCost = 0;
+      let multiMins = 0;
+      let multiCost = 0;
+      const now = session.endTime ?? new Date();
+
+      for (const slot of session.slots) {
+        const end = slot.endTime ?? now;
+        const slotDuration = Math.max(0, Math.floor((end.getTime() - slot.startTime.getTime()) / 60000));
+        const cost = slot.totalCost > 0 ? slot.totalCost : Number(((slotDuration / 60) * slot.hourlyRate).toFixed(2));
+
+        if (slot.type === "MULTI") {
+          multiMins += slotDuration;
+          multiCost += cost;
+        } else {
+          singleMins += slotDuration;
+          singleCost += cost;
+        }
+      }
+
+      if (singleMins > 0 && multiMins > 0) {
+        timeBreakdown = [
+          {
+            label: isBilliard ? "لعب بالساعة" : "لعب فردي",
+            duration: `${Math.floor(singleMins / 60)} س و ${singleMins % 60} د`,
+            cost: singleCost.toFixed(2),
+          },
+          {
+            label: isBilliard ? "لعب بالجيم" : "لعب جماعي (زوجي)",
+            duration: `${Math.floor(multiMins / 60)} س و ${multiMins % 60} د`,
+            cost: multiCost.toFixed(2),
+          },
+        ];
+      }
 
       let cafeSum = 0;
       session.orders.forEach((ord) => {
@@ -91,15 +132,18 @@ export default async function ReceiptPage({
       }));
     }
   } else {
-    deviceName = "PS5 - Room 1";
-    durationText = "0 س و 45 د";
-    timeCost = 35.0;
-    ordersList = [
-      { name: "كوكاكولا 330ml", qty: 1, total: "20.00" },
-      { name: "قهوة عربي", qty: 1, total: "18.00" },
+    deviceName = "طاولة بلياردو 1";
+    durationText = "1 س و 15 د";
+    timeCost = 65.0;
+    timeBreakdown = [
+      { label: "لعب بالساعة", duration: "0 س و 45 د", cost: "45.00" },
+      { label: "لعب بالجيم", duration: "0 س و 30 د", cost: "20.00" },
     ];
-    subTotal = 73.0;
-    finalTotal = 73.0;
+    ordersList = [
+      { name: "شاي كرك", qty: 2, total: "30.00" },
+    ];
+    subTotal = 95.0;
+    finalTotal = 95.0;
   }
 
   return (
@@ -119,7 +163,7 @@ export default async function ReceiptPage({
           {/* ترويسة الفاتورة */}
           <div className="receipt-header">
             <h2 className="title">PlayStation Lounge</h2>
-            <p className="subtitle">كافيه وألعاب إلكترونية</p>
+            <p className="subtitle">كافيه وألعاب إلكترونية وبلياردو</p>
             <p className="inv-no">فاتورة #{invoiceNumber}</p>
           </div>
 
@@ -131,7 +175,7 @@ export default async function ReceiptPage({
             </div>
             {deviceName && (
               <div className="row">
-                <span className="lbl">الجهاز:</span>
+                <span className="lbl">الجهاز / الطاولة:</span>
                 <span className="val font-bold">{deviceName}</span>
               </div>
             )}
@@ -158,12 +202,22 @@ export default async function ReceiptPage({
               <span>الإجمالي (ج.م)</span>
             </div>
 
-            {timeCost > 0 && (
+            {/* تفصيل الوقت المنفصل إن وجد تحويل */}
+            {timeBreakdown.length > 0 ? (
+              timeBreakdown.map((t, idx) => (
+                <div key={idx} className="item-row">
+                  <span>
+                    {t.label} ({t.duration})
+                  </span>
+                  <span className="price font-mono">{t.cost}</span>
+                </div>
+              ))
+            ) : timeCost > 0 ? (
               <div className="item-row">
                 <span>وقت اللعب ({durationText})</span>
                 <span className="price font-mono">{timeCost.toFixed(2)}</span>
               </div>
-            )}
+            ) : null}
 
             {ordersList.map((item, idx) => (
               <div key={idx} className="item-row">
@@ -201,9 +255,7 @@ export default async function ReceiptPage({
         </div>
       </div>
 
-      {/* هندسة الـ CSS المتوافقة مع XP-80 وجميع طابعات الفواتير */}
       <style>{`
-        /* تنسيق الشاشة العادية */
         .receipt-box {
           width: 70mm;
           max-width: 70mm;
@@ -307,7 +359,6 @@ export default async function ReceiptPage({
           margin-top: 8px;
         }
 
-        /* تنسيق الطابعة (XP-80 والطابعات الحرارية) */
         @page {
           size: 80mm auto;
           margin: 0mm !important;
@@ -347,7 +398,6 @@ export default async function ReceiptPage({
             color: #000 !important;
           }
 
-          /* إزالة أي ألوان رمادية لجعل الطباعة الحرارية سوداء داكنة وحادة */
           .receipt-header .subtitle,
           .lbl,
           .total-row,

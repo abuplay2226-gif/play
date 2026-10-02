@@ -9,10 +9,12 @@ interface UserEditModalProps {
     name: string | null;
     username: string;
     role: "ADMIN" | "CASHIER" | "STAFF";
+    defaultCashDrawerId?: string | null;
   };
+  cashDrawers: Array<{ id: string; name: string }>;
 }
 
-export function UserEditModal({ user }: UserEditModalProps) {
+export function UserEditModal({ user, cashDrawers }: UserEditModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState("");
@@ -21,6 +23,9 @@ export function UserEditModal({ user }: UserEditModalProps) {
   const [username, setUsername] = useState(user.username || "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"ADMIN" | "CASHIER" | "STAFF">(user.role);
+  const [defaultCashDrawerId, setDefaultCashDrawerId] = useState<string>(
+    user.defaultCashDrawerId || ""
+  );
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +44,7 @@ export function UserEditModal({ user }: UserEditModalProps) {
           username: username.trim(),
           password: password.trim() || undefined,
           role,
+          defaultCashDrawerId: defaultCashDrawerId || null,
         });
         setIsOpen(false);
         setPassword("");
@@ -72,12 +78,13 @@ export function UserEditModal({ user }: UserEditModalProps) {
           setUsername(user.username || "");
           setPassword("");
           setRole(user.role);
+          setDefaultCashDrawerId(user.defaultCashDrawerId || "");
           setErrorMsg("");
           setIsOpen(true);
         }}
         className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 hover:border-amber-400 hover:text-white transition"
       >
-        ✏️ تعديل الحساب / الباسورد
+        ✏️ تعديل الحساب / الخزينة
       </button>
 
       {isOpen && (
@@ -93,12 +100,9 @@ export function UserEditModal({ user }: UserEditModalProps) {
 
             <div className="border-b border-slate-800 pb-3 mb-4">
               <span className="rounded-full bg-amber-500/15 px-3 py-1 text-xs font-bold text-amber-300">
-                تعديل الحساب واسم الدخول
+                تعديل الموظف والخزينة المخصصة
               </span>
               <h3 className="mt-2 text-xl font-black text-white">{user.name}</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                تعديل الاسم الكامل، اسم الدخول، الصلاحية، أو تعيين كلمة مرور جديدة.
-              </p>
             </div>
 
             {errorMsg && (
@@ -109,43 +113,38 @@ export function UserEditModal({ user }: UserEditModalProps) {
 
             <form onSubmit={handleUpdate} className="space-y-3.5 text-xs">
               <div>
-                <label className="mb-1 block font-bold text-slate-300">الاسم الكامل للموظف:</label>
+                <label className="mb-1 block font-bold text-slate-300">الاسم الكامل:</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="مثال: أحمد محمد محمود"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-sky-400 font-bold"
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-1 block font-bold text-slate-300">اسم الدخول للنظام (Username):</label>
+                <label className="mb-1 block font-bold text-slate-300">اسم الدخول (Username):</label>
                 <input
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="مثال: ahmed / admin / cashier1"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-amber-300 font-bold font-mono outline-none focus:border-amber-400"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-amber-300 font-bold font-mono outline-none"
                   required
                 />
-                <span className="text-[10px] text-slate-500 block mt-0.5">
-                  هذا هو الاسم المستخدم لتسجيل الدخول في شاشة الدخول.
-                </span>
               </div>
 
               <div>
-                <label className="mb-1 block font-bold text-slate-300">تعيين كلمة مرور جديدة:</label>
+                <label className="mb-1 block font-bold text-slate-300">كلمة مرور جديدة (اختياري):</label>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="اتركها فارغة إذا كنت لا تريد تغييرها"
+                  placeholder="اتركها فارغة إذا لم ترد التغيير"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-sky-400"
                 />
               </div>
 
               <div>
-                <label className="mb-1 block font-bold text-slate-300">الدور / الصلاحية:</label>
+                <label className="mb-1 block font-bold text-slate-300">الصلاحية:</label>
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value as any)}
@@ -155,6 +154,28 @@ export function UserEditModal({ user }: UserEditModalProps) {
                   <option value="CASHIER">كاشير (Cashier)</option>
                   <option value="ADMIN">مدير النظام (Admin)</option>
                 </select>
+              </div>
+
+              {/* تخصيص الخزينة الافتراضية */}
+              <div className="rounded-2xl border border-sky-500/30 bg-slate-950/60 p-3 space-y-1.5">
+                <label className="block font-bold text-sky-300">
+                  🏦 الخزينة الافتراضية المخصصة لهذا الموظف:
+                </label>
+                <select
+                  value={defaultCashDrawerId}
+                  onChange={(e) => setDefaultCashDrawerId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-emerald-300 font-bold outline-none focus:border-sky-400"
+                >
+                  <option value="">-- بدون تخصيص (يختار بحرية عند فتح الشيفت) --</option>
+                  {cashDrawers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  🔒 عند تخصيص خزينة، ستُفتح ورديته عليها تلقائياً دون إتاحة اختيار خزائن أخرى.
+                </p>
               </div>
 
               <div className="flex gap-2 pt-2">

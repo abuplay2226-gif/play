@@ -15,6 +15,7 @@ import { DeviceTimer } from "@/components/device-timer";
 import { OpenSessionModal } from "@/components/open-session-modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SiteShell } from "@/components/site-shell";
+import { isBilliardDevice } from "@/lib/device-utils";
 import { prisma } from "@/lib/prisma";
 import type { DeviceStatus } from "@prisma/client";
 
@@ -35,14 +36,14 @@ export default async function DevicesPage() {
     loyaltyPts: c.loyaltyPts,
   }));
 
-  // استخراج الأنواع المسجلة حالياً في الصالة مع دمج الأنواع الافتراضية
-  const defaultTypes = ["PS5", "PS4", "غرفة VIP", "PC", "VR", "Xbox"];
+  // دمج البلياردو في الأنواع الافتراضية
+  const defaultTypes = ["PS5", "PS4", "بلياردو", "غرفة VIP", "PC", "VR", "Xbox"];
   const existingTypesFromDb = devices.map((d) => d.type);
   const allUniqueTypes = Array.from(new Set([...defaultTypes, ...existingTypesFromDb]));
 
   const deviceTypeOptions = allUniqueTypes.map((t) => ({
     value: t,
-    label: t,
+    label: t === "بلياردو" ? "طاولة بلياردو 🎱" : t,
   }));
 
   return (
@@ -57,11 +58,11 @@ export default async function DevicesPage() {
         </div>
       )}
 
-      {/* قسم إضافة جهاز جديد (للمدير) مع إمكانية ابتكار أي نوع جديد */}
+      {/* قسم إضافة جهاز / طاولة جديدة */}
       {user?.role === "ADMIN" && (
         <details className="mb-8 rounded-3xl border border-slate-800 bg-slate-900/60 p-5">
           <summary className="cursor-pointer font-bold text-sky-400 text-xs select-none">
-            + إضافة جهاز جديد إلى الصالة (يدعم أي نوع أو إصدار مستقبلي)
+            + إضافة جهاز أو طاولة بلياردو جديدة للصالة
           </summary>
           <form
             action={async (formData) => {
@@ -71,7 +72,6 @@ export default async function DevicesPage() {
               const singleHourlyRate = Number(formData.get("singleHourlyRate") ?? 0);
               const multiHourlyRate = Number(formData.get("multiHourlyRate") ?? 0);
 
-              // تنظيف الاسم إن كان نوعاً جديداً مدخلاً لايف
               const type = rawType.startsWith("NEW:") ? rawType.replace("NEW:", "").trim() : rawType;
 
               if (!name || !type) return;
@@ -80,16 +80,15 @@ export default async function DevicesPage() {
             className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 text-xs items-end"
           >
             <div>
-              <label className="mb-1 block text-slate-400 font-bold">اسم الجهاز:</label>
+              <label className="mb-1 block text-slate-400 font-bold">اسم الجهاز / الطاولة:</label>
               <input
                 name="name"
-                placeholder="مثال: PS5 - Room 3 / طاولة VR 1"
+                placeholder="مثال: طاولة بلياردو 1 / PS5 Room 2"
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white outline-none focus:border-sky-400"
                 required
               />
             </div>
 
-            {/* نوع الجهاز مع البحث الحي وإمكانية كتابة أي نوع جديد */}
             <div>
               <label className="mb-1 block text-slate-400 font-bold">
                 نوع الجهاز: (اختر أو اكتب نوعاً جديداً)
@@ -98,31 +97,31 @@ export default async function DevicesPage() {
                 name="type"
                 options={deviceTypeOptions}
                 placeholder="-- اختر النوع أو اكتب جديداً --"
-                searchPlaceholder="اختر أو اكتب (مثلاً: PS6, VR, بلياردو)..."
+                searchPlaceholder="اختر (بلياردو، PS5، VR)..."
                 emptyText="نوع غير موجود - اضغط بالزر لإضافته"
                 allowCreate={true}
-                createLabel="كنوع جهاز جديد"
+                createLabel="كنوع جديد"
                 required
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-slate-400 font-bold">سعر الفردي / س (ج.م):</label>
+              <label className="mb-1 block text-slate-400 font-bold">سعر الفردي / أو الساعة (ج.م):</label>
               <input
                 name="singleHourlyRate"
                 type="number"
-                placeholder="120"
+                placeholder="60"
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
                 required
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-slate-400 font-bold">سعر المجموعة / س (ج.م):</label>
+              <label className="mb-1 block text-slate-400 font-bold">سعر الزوجي / أو الجيم (ج.م):</label>
               <input
                 name="multiHourlyRate"
                 type="number"
-                placeholder="180"
+                placeholder="20"
                 className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-emerald-400 font-mono font-bold outline-none focus:border-emerald-400"
                 required
               />
@@ -140,9 +139,10 @@ export default async function DevicesPage() {
         </details>
       )}
 
-      {/* كروت الأجهزة */}
+      {/* كروت الأجهزة وطاولات البلياردو */}
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {devices.map((device) => {
+          const isBilliard = isBilliardDevice(device.type);
           const activeSession = device.sessions[0] ?? null;
           const isOccupied = device.status === "OCCUPIED" && activeSession !== null;
           const isPaused = activeSession?.status === "PAUSED";
@@ -157,6 +157,10 @@ export default async function DevicesPage() {
           const currentCustomer = activeSession?.customer ?? null;
           const plannedMinutes = (activeSession as any)?.plannedMinutes ?? null;
 
+          // مسميات الأوضاع حسب نوع الجهاز
+          const singleTitle = isBilliard ? "بالساعة" : "فردي";
+          const multiTitle = isBilliard ? "بالجيم" : "مجموعة (زوجي)";
+
           return (
             <article
               key={device.id}
@@ -169,7 +173,6 @@ export default async function DevicesPage() {
               } shadow-xl`}
             >
               <div>
-                {/* رأس الكارت مع إمكانية التعديل للمدير */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span
@@ -202,7 +205,7 @@ export default async function DevicesPage() {
                   <div className="text-left">
                     <h3 className="text-lg font-black text-white">{device.name}</h3>
                     <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-sky-300">
-                      {device.type}
+                      {isBilliard ? "🎱 طاولة بلياردو" : device.type}
                     </span>
                   </div>
                 </div>
@@ -228,15 +231,19 @@ export default async function DevicesPage() {
                   </div>
                 )}
 
-                {/* أسعار الساعة */}
+                {/* أسعار الساعة والجيم للبلياردو أو الفردي والزوجي للبلايستيشن */}
                 <div className="mt-3 space-y-1 text-sm border-t border-slate-800/80 pt-2.5">
                   <div className="flex justify-between text-slate-300">
                     <span className="font-mono font-bold text-white">{device.singleHourlyRate} ج.م</span>
-                    <span className="text-slate-400 text-xs">سعر الفردي:</span>
+                    <span className="text-slate-400 text-xs">
+                      {isBilliard ? "سعر الساعة:" : "سعر الفردي:"}
+                    </span>
                   </div>
                   <div className="flex justify-between text-slate-300">
                     <span className="font-mono font-bold text-white">{device.multiHourlyRate} ج.م</span>
-                    <span className="text-slate-400 text-xs">سعر المجموعة:</span>
+                    <span className="text-slate-400 text-xs">
+                      {isBilliard ? "سعر الجيم:" : "سعر المجموعة:"}
+                    </span>
                   </div>
                 </div>
 
@@ -246,10 +253,10 @@ export default async function DevicesPage() {
                     <div>
                       <div className="mb-2 flex items-center justify-between text-xs">
                         <span className="rounded bg-sky-500/20 px-2 py-0.5 font-bold text-sky-300">
-                          وضع: {currentSlotType === "MULTI" ? "مجموعة (زوجي)" : "فردي"}
+                          نظام: {currentSlotType === "MULTI" ? multiTitle : singleTitle}
                         </span>
                         <span className="text-slate-400 font-mono">
-                          {activeSession.fixedDuration === -999 ? "مدفوع بالباقة ✨" : `${currentRate} ج.م / س`}
+                          {activeSession.fixedDuration === -999 ? "مدفوع بالباقة ✨" : `${currentRate} ج.م / ${isBilliard && currentSlotType === "MULTI" ? "جيم" : "س"}`}
                         </span>
                       </div>
                       <DeviceTimer
@@ -264,7 +271,7 @@ export default async function DevicesPage() {
                     </div>
                   ) : (
                     <div className="py-2 text-center text-xs font-semibold text-slate-500">
-                      الجهاز متاح وجاهز لبدء جلسة جديدة
+                      {isBilliard ? "الطاولة متاحة وجاهزة لبدء اللعب" : "الجهاز متاح وجاهز لبدء جلسة جديدة"}
                     </div>
                   )}
                 </div>
@@ -305,6 +312,7 @@ export default async function DevicesPage() {
                         </form>
                       )}
 
+                      {/* زر التبديل يتبدل اسمه حسب نوع الجهاز */}
                       <form
                         action={async () => {
                           "use server";
@@ -316,7 +324,7 @@ export default async function DevicesPage() {
                           type="submit"
                           className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2 text-xs font-bold text-slate-200 hover:border-slate-500 transition"
                         >
-                          تبديل لـ {currentSlotType === "SINGLE" ? "مجموعة" : "فردي"}
+                          تبديل لـ {currentSlotType === "SINGLE" ? (isBilliard ? "بالجيم" : "مجموعة") : (isBilliard ? "بالساعة" : "فردي")}
                         </button>
                       </form>
                     </div>

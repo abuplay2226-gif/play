@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { deleteDevice, updateDevice } from "@/app/actions/devices";
+import { isBilliardDevice } from "@/lib/device-utils";
 
 interface DeviceEditModalProps {
   device: {
@@ -18,11 +19,16 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
   const [name, setName] = useState(device.name);
   const [type, setType] = useState(device.type);
   const [customType, setCustomType] = useState("");
-  const [isCustom, setIsCustom] = useState(!["PS5", "PS4", "PC", "غرفة VIP", "VR", "Xbox"].includes(device.type));
+  const [isCustom, setIsCustom] = useState(
+    !["PS5", "PS4", "PC", "غرفة VIP", "VR", "Xbox", "بلياردو"].includes(device.type)
+  );
   const [singleRate, setSingleRate] = useState(device.singleHourlyRate);
   const [multiRate, setMultiRate] = useState(device.multiHourlyRate);
   const [isPending, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState("");
+
+  const currentTypeToCheck = isCustom ? customType : type;
+  const isBilliard = isBilliardDevice(currentTypeToCheck);
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,7 +106,7 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
 
             <form onSubmit={handleUpdate} className="space-y-3 text-xs">
               <div>
-                <label className="mb-1 block font-bold text-slate-300">اسم الجهاز:</label>
+                <label className="mb-1 block font-bold text-slate-300">اسم الجهاز / الطاولة:</label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -125,7 +131,7 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
                   <input
                     value={customType}
                     onChange={(e) => setCustomType(e.target.value)}
-                    placeholder="اكتب نوع الجهاز (مثلاً: PS6 / VR / بلياردو)..."
+                    placeholder="اكتب نوع الجهاز (مثلاً: بلياردو / PS6 / VR)..."
                     className="w-full rounded-xl border border-dashed border-sky-500/40 bg-slate-950 px-3 py-2 text-white outline-none focus:border-sky-400"
                     required
                   />
@@ -137,6 +143,7 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
                   >
                     <option value="PS5">PS5</option>
                     <option value="PS4">PS4</option>
+                    <option value="بلياردو">طاولة بلياردو 🎱</option>
                     <option value="غرفة VIP">غرفة VIP</option>
                     <option value="PC">PC</option>
                     <option value="VR">VR (واقع افتراضي)</option>
@@ -145,9 +152,12 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
                 )}
               </div>
 
+              {/* أسعار الساعة والجيم للبلياردو أو الفردي والزوجي للبلايستيشن */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="mb-1 block font-bold text-slate-300">سعر الفردي / س (ج.م):</label>
+                  <label className="mb-1 block font-bold text-slate-300">
+                    {isBilliard ? "سعر الساعة (ج.م):" : "سعر الفردي / س (ج.م):"}
+                  </label>
                   <input
                     type="number"
                     step="any"
@@ -158,7 +168,9 @@ export function DeviceEditModal({ device }: DeviceEditModalProps) {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block font-bold text-slate-300">سعر المجموعة / س (ج.م):</label>
+                  <label className="mb-1 block font-bold text-slate-300">
+                    {isBilliard ? "سعر الجيم (ج.م):" : "سعر المجموعة / س (ج.م):"}
+                  </label>
                   <input
                     type="number"
                     step="any"

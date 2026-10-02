@@ -11,6 +11,8 @@ export type StaffUser = {
   username: string;
   email: string;
   role: "ADMIN" | "CASHIER" | "STAFF";
+  defaultCashDrawerId?: string | null;
+  defaultCashDrawerName?: string | null;
   createdAt: Date;
   shifts: Array<{ id: string }>;
 };
@@ -26,12 +28,15 @@ function extractUsername(email: string, name?: string | null): string {
   return name?.trim() || email.split("@")[0] || "user";
 }
 
-// جلب الموظفين مع استخراج اسم الدخول
+// 1. جلب الموظفين مع الخزينة الافتراضية المربوطة
 export async function getUsers(): Promise<StaffUser[]> {
   await assertAuthorized(["ADMIN"]);
 
   const users = await prisma.user.findMany({
-    include: { shifts: true },
+    include: {
+      shifts: true,
+      defaultCashDrawer: true,
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -41,12 +46,14 @@ export async function getUsers(): Promise<StaffUser[]> {
     username: extractUsername(u.email, u.name),
     email: u.email,
     role: u.role as "ADMIN" | "CASHIER" | "STAFF",
+    defaultCashDrawerId: u.defaultCashDrawerId,
+    defaultCashDrawerName: u.defaultCashDrawer?.name ?? null,
     createdAt: u.createdAt,
     shifts: u.shifts.map((s) => ({ id: s.id })),
   }));
 }
 
-// 1. إنشاء موظف جديد بـ (الاسم الكامل + اسم الدخول + كلمة المرور)
+// 2. إنشاء موظف جديد وتعيين خزينته
 export async function createUser(formData: FormData): Promise<void> {
   await assertAuthorized(["ADMIN"]);
 
@@ -57,6 +64,8 @@ export async function createUser(formData: FormData): Promise<void> {
     .replace(/\s+/g, "_");
   const password = String(formData.get("password") ?? "").trim();
   const rawRole = String(formData.get("role") ?? "STAFF");
+  const defaultCashDrawerId = String(formData.get("defaultCashDrawerId") ?? "").trim() || null;
+
   const role = ["ADMIN", "CASHIER", "STAFF"].includes(rawRole)
     ? (rawRole as "ADMIN" | "CASHIER" | "STAFF")
     : "STAFF";
@@ -67,7 +76,6 @@ export async function createUser(formData: FormData): Promise<void> {
 
   const generatedEmail = `${username}@play.local`;
 
-  // التحقق من عدم تكرار اسم الدخول
   const existing = await prisma.user.findFirst({
     where: {
       OR: [
@@ -81,14 +89,13 @@ export async function createUser(formData: FormData): Promise<void> {
     throw new Error(`اسم الدخول (${username}) مستخدم بالفعل، يرجى اختيار اسم دخول آخر`);
   }
 
-  const hashedPassword = hashPassword(password);
-
   await prisma.user.create({
     data: {
       name,
       email: generatedEmail,
-      password: hashedPassword,
+      password: hashPassword(password),
       role,
+      defaultCashDrawerId,
     },
   });
 
@@ -96,13 +103,14 @@ export async function createUser(formData: FormData): Promise<void> {
   revalidatePath("/admin");
 }
 
-// 2. تعديل الاسم الكامل واسم الدخول وكلمة المرور والصلاحية
+// 3. تعديل الموظف وتحديث الخزينة المربوطة به
 export async function updateUser(input: {
   userId: string;
   name: string;
   username: string;
   password?: string;
   role: "ADMIN" | "CASHIER" | "STAFF";
+  defaultCashDrawerId?: string | null;
 }) {
   await assertAuthorized(["ADMIN"]);
 
@@ -116,7 +124,6 @@ export async function updateUser(input: {
 
   const generatedEmail = `${username}@play.local`;
 
-  // التحقق من عدم استخدام اسم الدخول من قبل حساب آخر
   const existing = await prisma.user.findFirst({
     where: {
       OR: [
@@ -135,6 +142,7 @@ export async function updateUser(input: {
     name,
     email: generatedEmail,
     role: input.role,
+    defaultCashDrawerId: input.defaultCashDrawerId || null,
   };
 
   if (input.password && input.password.trim()) {
@@ -151,7 +159,7 @@ export async function updateUser(input: {
   return updated;
 }
 
-// 3. حذف موظف
+// 4. حذف موظف
 export async function deleteUser(userId: string) {
   const currentUser = await assertAuthorized(["ADMIN"]);
 
@@ -178,7 +186,7 @@ export async function deleteUser(userId: string) {
   return true;
 }
 
-// 4. كشف مسحوبات وسلف الموظف
+// 5. كشف مسحوبات وسلف الموظف
 export async function getEmployeeLedger(input: {
   userId: string;
   startDate?: string;

@@ -22,9 +22,9 @@ const quickLinks = [
 ];
 
 export default async function AdminPage() {
-  await requireRole(["ADMIN"]);
+  const user = await requireRole(["ADMIN"]);
 
-  const [summary, users] = await Promise.all([
+  const [summary, usersList] = await Promise.all([
     getDashboardSummary(),
     getUsers() as Promise<Array<{
       id: string;
@@ -42,7 +42,7 @@ export default async function AdminPage() {
   ];
 
   return (
-    <SiteShell title="لوحة المدير">
+    <SiteShell title="لوحة المدير" userRole={user.role} userName={user.name}>
       <div className="rounded-[32px] border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-slate-900 to-slate-950 p-5">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -77,21 +77,21 @@ export default async function AdminPage() {
             </Link>
           </div>
           <div className="mt-5 space-y-3">
-            {users.slice(0, 5).map((user) => (
-              <div key={user.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
+            {usersList.slice(0, 5).map((staffMember) => (
+              <div key={staffMember.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 text-slate-200">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-bold text-white">{user.name ?? "غير محدد"}</span>
+                  <span className="font-bold text-white">{staffMember.name ?? "غير محدد"}</span>
                   <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
-                    user.role === "ADMIN"
+                    staffMember.role === "ADMIN"
                       ? "bg-violet-500/15 text-violet-300"
-                      : user.role === "CASHIER"
+                      : staffMember.role === "CASHIER"
                         ? "bg-emerald-500/15 text-emerald-300"
                         : "bg-sky-500/15 text-sky-300"
                   }`}>
-                    {user.role}
+                    {staffMember.role}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-slate-400">{user.email}</p>
+                <p className="mt-1 text-xs text-slate-400">{staffMember.email}</p>
               </div>
             ))}
           </div>

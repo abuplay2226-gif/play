@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { openDeviceSession, quickCreateCustomer } from "@/app/actions/devices";
 import { getCustomerActivePackages, type CustomerSubscription } from "@/app/actions/packages";
+import { isBilliardDevice } from "@/lib/device-utils";
 import type { SlotType } from "@prisma/client";
 
 interface CustomerItem {
@@ -31,6 +32,8 @@ export function OpenSessionModal({
 }: OpenSessionModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const isBilliard = isBilliardDevice(device.type);
 
   const [customers, setCustomers] = useState<CustomerItem[]>(initialCustomers);
   const [searchQuery, setSearchQuery] = useState("");
@@ -173,7 +176,9 @@ export function OpenSessionModal({
                 {device.type}
               </span>
               <h2 className="mt-2 text-2xl font-black text-white">{device.name}</h2>
-              <p className="text-xs text-slate-400 mt-1">حدد العميل وطريقة ونظام وقت اللعب</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {isBilliard ? "حدد العميل ونظام الحساب (بالساعة أو بالجيم)" : "حدد العميل وطريقة ونظام وقت اللعب"}
+              </p>
             </div>
 
             {/* 1. اختيار العميل */}
@@ -193,7 +198,6 @@ export function OpenSessionModal({
                     </button>
                   </div>
 
-                  {/* كاشف باقة العميل التلقائي */}
                   {activePackage && (
                     <div className="rounded-xl bg-slate-950/80 border border-emerald-500/40 p-2.5 flex items-center justify-between text-xs animate-in fade-in">
                       <div>
@@ -298,9 +302,11 @@ export function OpenSessionModal({
               )}
             </div>
 
-            {/* 2. نوع اللعب */}
+            {/* 2. نوع اللعب (فردي/جماعي أو بالساعة/بالجيم) */}
             <div className="mb-4">
-              <label className="mb-1.5 block text-xs font-bold text-slate-300">وضع اللعب:</label>
+              <label className="mb-1.5 block text-xs font-bold text-slate-300">
+                {isBilliard ? "نظام حساب البلياردو:" : "وضع اللعب:"}
+              </label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -311,7 +317,7 @@ export function OpenSessionModal({
                       : "border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700"
                   }`}
                 >
-                  <p className="text-xs font-black">جلسة فردية</p>
+                  <p className="text-xs font-black">{isBilliard ? "🎱 لعب بالساعة" : "جلسة فردية"}</p>
                   <p className="font-mono text-xs font-bold text-sky-300 mt-0.5">
                     {usePackage ? "0 ج.م (بالباقة)" : `${device.singleHourlyRate} ج.م / س`}
                   </p>
@@ -326,9 +332,9 @@ export function OpenSessionModal({
                       : "border-slate-800 bg-slate-950/60 text-slate-400 hover:border-slate-700"
                   }`}
                 >
-                  <p className="text-xs font-black">جلسة مجموعة (زوجي)</p>
+                  <p className="text-xs font-black">{isBilliard ? "🎯 لعب بالجيم" : "جلسة مجموعة (زوجي)"}</p>
                   <p className="font-mono text-xs font-bold text-indigo-300 mt-0.5">
-                    {usePackage ? "0 ج.م (بالباقة)" : `${device.multiHourlyRate} ج.م / س`}
+                    {usePackage ? "0 ج.م (بالباقة)" : `${device.multiHourlyRate} ج.م / ${isBilliard ? "جيم" : "س"}`}
                   </p>
                 </button>
               </div>

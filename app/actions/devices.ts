@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { assertAuthorized } from "@/lib/auth-guard";
+import { isBilliardDevice } from "@/lib/device-utils";
 import { prisma } from "@/lib/prisma";
 import type { DeviceStatus, SlotType } from "@prisma/client";
 
@@ -66,7 +67,7 @@ export async function getActiveSessions() {
   });
 }
 
-// 1. إنشاء جهاز جديد (يقبل أي نوع نصي جديد: PS5, PS6, VR, Xbox, بلياردو...)
+// 1. إنشاء جهاز جديد (يقبل أي نوع: PS5, بلياردو, VR, PC...)
 export async function createDevice(input: {
   name: string;
   type: string;
@@ -95,7 +96,7 @@ export async function createDevice(input: {
   return device;
 }
 
-// 2. تعديل بيانات الجهاز والنوع بحرية تامة
+// 2. تعديل بيانات الجهاز
 export async function updateDevice(input: {
   deviceId: string;
   name: string;
@@ -126,7 +127,7 @@ export async function updateDevice(input: {
   return updated;
 }
 
-// 3. حذف الجهاز بالكامل
+// 3. حذف الجهاز
 export async function deleteDevice(deviceId: string) {
   await assertAuthorized(["ADMIN"]);
 
@@ -510,6 +511,7 @@ export async function closeDeviceSession(sessionId: string) {
   });
 }
 
+// دالة تفصيل الحساب وتفصيل الفردي والجماعي (أو بالساعة وبالجيم للبلياردو)
 export async function getSessionCheckoutPreview(sessionId: string) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
@@ -519,7 +521,7 @@ export async function getSessionCheckoutPreview(sessionId: string) {
       include: {
         device: true,
         customer: true,
-        slots: true,
+        slots: { orderBy: { startTime: "asc" } },
         shift: { include: { cashDrawer: true } },
         orders: {
           where: { status: { not: "CANCELLED" } },
@@ -535,15 +537,44 @@ export async function getSessionCheckoutPreview(sessionId: string) {
 
   if (!session) throw new Error("الجلسة غير موجودة");
 
+  const isBilliard = isBilliardDevice(session.device.type);
   const now = new Date();
   const isPackageSession = session.fixedDuration === -999 || session.slots.some((s) => s.hourlyRate === 0);
+
   let totalTimeCost = 0;
+  let singleMinutes = 0;
+  let singleCost = 0;
+  let multiMinutes = 0;
+  let multiCost = 0;
 
   for (const slot of session.slots) {
     const end = slot.endTime ?? now;
-    totalTimeCost += isPackageSession ? 0 : calculateSlotCost(slot.startTime, end, slot.hourlyRate);
+    const slotMins = Math.max(0, Math.floor((end.getTime() - slot.startTime.getTime()) / 60000));
+    const cost = isPackageSession ? 0 : calculateSlotCost(slot.startTime, end, slot.hourlyRate);
+
+    if (slot.type === "MULTI") {
+      multiMinutes += slotMins;
+      multiCost += cost;
+    } else {
+      singleMinutes += slotMins;
+      singleCost += cost;
+    }
+    totalTimeCost += cost;
   }
+
   totalTimeCost = Number(totalTimeCost.toFixed(2));
+  singleCost = Number(singleCost.toFixed(2));
+  multiCost = Number(multiCost.toFixed(2));
+
+  const formatMins = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h} س و ${m} د`;
+  };
+
+  const totalMinutes = singleMinutes + multiMinutes;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
 
   const orderItemsList: Array<{ name: string; quantity: number; unitPrice: number; subTotal: number }> = [];
   let ordersTotal = 0;
@@ -564,16 +595,14 @@ export async function getSessionCheckoutPreview(sessionId: string) {
   const exactTotal = Number((totalTimeCost + ordersTotal).toFixed(2));
   const roundedTotal = roundToNearest5(exactTotal);
 
-  const totalMinutes = Math.max(0, Math.floor((now.getTime() - session.startTime.getTime()) / 60000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
   const defaultDrawerId = session.shift?.cashDrawerId || allDrawers[0]?.id || "";
   const defaultDrawerName = session.shift?.cashDrawer?.name || "الخزينة الافتراضية";
 
   return {
     sessionId: session.id,
     deviceName: session.device.name,
+    deviceType: session.device.type,
+    isBilliard,
     defaultCashDrawerId: defaultDrawerId,
     defaultCashDrawerName: defaultDrawerName,
     availableCashDrawers: allDrawers,
@@ -582,6 +611,16 @@ export async function getSessionCheckoutPreview(sessionId: string) {
     endTime: now,
     durationText: `${hours} س و ${minutes} د`,
     totalTimeCost,
+
+    // تفاصيل أوضاع اللعب المنفصلة
+    singleMinutes,
+    singleDurationText: formatMins(singleMinutes),
+    singleCost,
+    multiMinutes,
+    multiDurationText: formatMins(multiMinutes),
+    multiCost,
+    hasSwitchedModes: singleMinutes > 0 && multiMinutes > 0,
+
     ordersTotal,
     exactTotal,
     roundedTotal,
