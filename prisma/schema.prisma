@@ -355,7 +355,7 @@ model Booking {
 }
 
 // -------------------------------------------------------------
-// 8. العروض والباقات وتقييمات العملاء
+// 8. العروض والباقات وتقييمات العملاء وإعدادات الهيرو والموقع
 // -------------------------------------------------------------
 
 model ServiceOffer {
@@ -388,6 +388,18 @@ model CustomerReview {
   active    Boolean  @default(true)
   order     Int      @default(0)
   createdAt DateTime @default(now())
+}
+
+model LoungeSetting {
+  id           String   @id @default("default")
+  heroImage    String?
+  heroTitle    String?  @default("أهلاً بك في أفضل صالة ألعاب وبلياردو")
+  heroSubtitle String?  @default("أجواء استثنائية، بطولات حماسية، ومشروبات مميزة بانتظارك!")
+  address      String?  @default("شارع النزهة - بجوار سيتي سنتر")
+  mapUrl       String?
+  phone        String?  @default("01000000000")
+  whatsapp     String?  @default("201000000000")
+  updatedAt    DateTime @default(now()) @updatedAt
 }
 
 // -------------------------------------------------------------

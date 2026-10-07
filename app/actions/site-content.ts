@@ -35,6 +35,16 @@ export type LandingPageReview = {
   order: number;
 };
 
+export type LoungeSettings = {
+  heroImage: string;
+  heroTitle: string;
+  heroSubtitle: string;
+  address: string;
+  mapUrl: string;
+  phone: string;
+  whatsapp: string;
+};
+
 function parsePackageMeta(rawFeature?: string | null) {
   if (!rawFeature) {
     return { hours: 5, validityDays: 30, drinksCount: 0, deviceType: "ALL", description: "باقة مميزة" };
@@ -53,6 +63,64 @@ function parsePackageMeta(rawFeature?: string | null) {
   }
 }
 
+export async function getLoungeSettings(): Promise<LoungeSettings> {
+  const defaults: LoungeSettings = {
+    heroImage: "https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1600&auto=format&fit=crop",
+    heroTitle: "أهلاً بك في أفضل صالة بلايستيشن وبلياردو",
+    heroSubtitle: "أجواء شبابية راقية، شاشات 4K فائقة، طاولات بلياردو احترافية، ومشروبات باردة وساخنة 🎮🎱",
+    address: "شارع النزهة - الحي الرابع - أمام سيتي سنتر",
+    mapUrl: "https://maps.google.com/maps?q=Cairo&t=&z=13&ie=UTF8&iwloc=&output=embed",
+    phone: "01000000000",
+    whatsapp: "201000000000",
+  };
+
+  // 1. القراءة من جدول LoungeSetting عبر استعلام مباشر
+  try {
+    const rows: any = await prisma.$queryRawUnsafe(
+      `SELECT * FROM "LoungeSetting" WHERE "id" = 'default' LIMIT 1`
+    );
+
+    if (Array.isArray(rows) && rows.length > 0) {
+      const r = rows[0];
+      return {
+        heroImage: r.heroImage || defaults.heroImage,
+        heroTitle: r.heroTitle || defaults.heroTitle,
+        heroSubtitle: r.heroSubtitle || defaults.heroSubtitle,
+        address: r.address || defaults.address,
+        mapUrl: r.mapUrl || defaults.mapUrl,
+        phone: r.phone || defaults.phone,
+        whatsapp: r.whatsapp || defaults.whatsapp,
+      };
+    }
+  } catch {
+    // استمرار للقراءة الاحتياطية
+  }
+
+  // 2. القراءة الاحتياطية من ServiceOffer
+  try {
+    const settingRecord = await prisma.serviceOffer.findFirst({
+      where: { title: "__LOUNGE_SETTINGS__" },
+    });
+
+    if (settingRecord && settingRecord.description) {
+      const parsed = JSON.parse(settingRecord.description);
+      return {
+        heroImage: parsed.heroImage || defaults.heroImage,
+        heroTitle: parsed.heroTitle || defaults.heroTitle,
+        heroSubtitle: parsed.heroSubtitle || defaults.heroSubtitle,
+        address: parsed.address || defaults.address,
+        mapUrl: parsed.mapUrl || defaults.mapUrl,
+        phone: parsed.phone || defaults.phone,
+        whatsapp: parsed.whatsapp || defaults.whatsapp,
+      };
+    }
+  } catch {
+    // في حال عدم وجود سجلات يتم إرجاع القيم الافتراضية
+  }
+
+  return defaults;
+}
+
 export async function getLandingPageContent(): Promise<{
   services: LandingPageService[];
   packages: LandingPagePackage[];
@@ -62,7 +130,7 @@ export async function getLandingPageContent(): Promise<{
 
   const [services, rawPackages, reviews] = await Promise.all([
     prismaClient.serviceOffer.findMany({
-      where: { active: true },
+      where: { active: true, title: { not: "__LOUNGE_SETTINGS__" } },
       orderBy: { order: "asc" },
     }),
     prismaClient.packagePlan.findMany({
