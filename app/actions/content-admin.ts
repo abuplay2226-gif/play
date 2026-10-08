@@ -28,6 +28,7 @@ export async function updateLoungeSettings(formData: FormData): Promise<{ succes
     await assertAuthorized(["ADMIN"]);
 
     const heroImage = String(formData.get("heroImage") ?? "").trim();
+    const heroMobileImage = String(formData.get("heroMobileImage") ?? "").trim();
     const heroTitle = String(formData.get("heroTitle") ?? "").trim();
     const heroSubtitle = String(formData.get("heroSubtitle") ?? "").trim();
     const address = String(formData.get("address") ?? "").trim();
@@ -37,6 +38,7 @@ export async function updateLoungeSettings(formData: FormData): Promise<{ succes
 
     const settingsPayload = {
       heroImage: heroImage || null,
+      heroMobileImage: heroMobileImage || null,
       heroTitle: heroTitle || null,
       heroSubtitle: heroSubtitle || null,
       address: address || null,
@@ -45,12 +47,13 @@ export async function updateLoungeSettings(formData: FormData): Promise<{ succes
       whatsapp: whatsapp || null,
     };
 
-    // 1. إنشاء جدول LoungeSetting في قاعدة البيانات تلقائياً بـ SQL إذا لم يكن منشأ مسبقاً
+    // 1. تحديث جدول LoungeSetting في قاعدة البيانات تلقائياً مع دعم عمود الموبايل
     try {
       await prisma.$executeRawUnsafe(`
         CREATE TABLE IF NOT EXISTS "LoungeSetting" (
           "id" TEXT PRIMARY KEY DEFAULT 'default',
           "heroImage" TEXT,
+          "heroMobileImage" TEXT,
           "heroTitle" TEXT,
           "heroSubtitle" TEXT,
           "address" TEXT,
@@ -61,12 +64,18 @@ export async function updateLoungeSettings(formData: FormData): Promise<{ succes
         );
       `);
 
+      // إضافة العمود في حال كان الجدول منشأ سابقاً بدونه
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "LoungeSetting" ADD COLUMN IF NOT EXISTS "heroMobileImage" TEXT;
+      `);
+
       await prisma.$executeRawUnsafe(
         `
-        INSERT INTO "LoungeSetting" ("id", "heroImage", "heroTitle", "heroSubtitle", "address", "mapUrl", "phone", "whatsapp", "updatedAt")
-        VALUES ('default', $1, $2, $3, $4, $5, $6, $7, NOW())
+        INSERT INTO "LoungeSetting" ("id", "heroImage", "heroMobileImage", "heroTitle", "heroSubtitle", "address", "mapUrl", "phone", "whatsapp", "updatedAt")
+        VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8, NOW())
         ON CONFLICT ("id") DO UPDATE SET
           "heroImage" = EXCLUDED."heroImage",
+          "heroMobileImage" = EXCLUDED."heroMobileImage",
           "heroTitle" = EXCLUDED."heroTitle",
           "heroSubtitle" = EXCLUDED."heroSubtitle",
           "address" = EXCLUDED."address",
@@ -76,6 +85,7 @@ export async function updateLoungeSettings(formData: FormData): Promise<{ succes
           "updatedAt" = NOW();
       `,
         settingsPayload.heroImage,
+        settingsPayload.heroMobileImage,
         settingsPayload.heroTitle,
         settingsPayload.heroSubtitle,
         settingsPayload.address,

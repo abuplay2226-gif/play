@@ -37,6 +37,7 @@ export type LandingPageReview = {
 
 export type LoungeSettings = {
   heroImage: string;
+  heroMobileImage?: string;
   heroTitle: string;
   heroSubtitle: string;
   address: string;
@@ -66,6 +67,7 @@ function parsePackageMeta(rawFeature?: string | null) {
 export async function getLoungeSettings(): Promise<LoungeSettings> {
   const defaults: LoungeSettings = {
     heroImage: "https://images.unsplash.com/photo-1511512578047-dfb367046420?q=80&w=1600&auto=format&fit=crop",
+    heroMobileImage: "",
     heroTitle: "أهلاً بك في أفضل صالة بلايستيشن وبلياردو",
     heroSubtitle: "أجواء شبابية راقية، شاشات 4K فائقة، طاولات بلياردو احترافية، ومشروبات باردة وساخنة 🎮🎱",
     address: "شارع النزهة - الحي الرابع - أمام سيتي سنتر",
@@ -84,6 +86,7 @@ export async function getLoungeSettings(): Promise<LoungeSettings> {
       const r = rows[0];
       return {
         heroImage: r.heroImage || defaults.heroImage,
+        heroMobileImage: r.heroMobileImage || defaults.heroMobileImage || "",
         heroTitle: r.heroTitle || defaults.heroTitle,
         heroSubtitle: r.heroSubtitle || defaults.heroSubtitle,
         address: r.address || defaults.address,
@@ -106,6 +109,7 @@ export async function getLoungeSettings(): Promise<LoungeSettings> {
       const parsed = JSON.parse(settingRecord.description);
       return {
         heroImage: parsed.heroImage || defaults.heroImage,
+        heroMobileImage: parsed.heroMobileImage || defaults.heroMobileImage || "",
         heroTitle: parsed.heroTitle || defaults.heroTitle,
         heroSubtitle: parsed.heroSubtitle || defaults.heroSubtitle,
         address: parsed.address || defaults.address,

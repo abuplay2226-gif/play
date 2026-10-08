@@ -10,6 +10,7 @@ export function LoungeSettingsForm({
   initialSettings: LoungeSettings;
 }) {
   const [heroImage, setHeroImage] = useState(initialSettings.heroImage || "");
+  const [heroMobileImage, setHeroMobileImage] = useState(initialSettings.heroMobileImage || "");
   const [heroTitle, setHeroTitle] = useState(initialSettings.heroTitle || "");
   const [heroSubtitle, setHeroSubtitle] = useState(initialSettings.heroSubtitle || "");
   const [address, setAddress] = useState(initialSettings.address || "");
@@ -26,6 +27,7 @@ export function LoungeSettingsForm({
 
     const formData = new FormData();
     formData.set("heroImage", heroImage.trim());
+    formData.set("heroMobileImage", heroMobileImage.trim());
     formData.set("heroTitle", heroTitle.trim());
     formData.set("heroSubtitle", heroSubtitle.trim());
     formData.set("address", address.trim());
@@ -41,7 +43,7 @@ export function LoungeSettingsForm({
         } else {
           setStatus({
             type: "success",
-            message: "✓ تم حفظ وتحديث الإعدادات بنجاح! صفحة العميل تم تحديثها الآن.",
+            message: "✓ تم حفظ وتحديث الإعدادات بنجاح! صفحة العميل تم تحديثها الآن للكمبيوتر والموبايل.",
           });
         }
       } catch (err: any) {
@@ -67,23 +69,70 @@ export function LoungeSettingsForm({
         </div>
       )}
 
+      {/* حقول الصور: صورة الكمبيوتر وصورة الموبايل */}
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block font-bold text-slate-300">
-            رابط صورة الهيرو الرئيسية (Hero Image URL):
+            رابط صورة الهيرو الرئيسية للكمبيوتر (Landscape):
           </label>
           <input
             value={heroImage}
             onChange={(e) => setHeroImage(e.target.value)}
-            placeholder="https://example.com/lounge-banner.jpg"
+            placeholder="https://example.com/desktop-banner.jpg"
             className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none focus:border-amber-400 font-mono"
             required
           />
           <span className="text-[10px] text-slate-500 mt-1 block">
-            ضع رابط صورة مباشرة من Imgur أو Unsplash أو موقع الصالة.
+            صورة عرضية للشاشات الكبيرة واللابتوب.
           </span>
         </div>
 
+        <div>
+          <label className="mb-1 block font-bold text-slate-300">
+            رابط صورة مخصصة للموبايل (اختياري - مقاس طولي 9:16):
+          </label>
+          <input
+            value={heroMobileImage}
+            onChange={(e) => setHeroMobileImage(e.target.value)}
+            placeholder="https://example.com/mobile-portrait-wallpaper.jpg"
+            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none focus:border-amber-400 font-mono"
+          />
+          <span className="text-[10px] text-slate-500 mt-1 block">
+            إذا تركتها فارغة، سيعالج النظام الصورة الرئيسية بذكاء ليناسب الهواتف.
+          </span>
+        </div>
+      </div>
+
+      {/* معاينة الصورتين */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {heroImage && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 flex items-center gap-3">
+            <div
+              className="h-16 w-24 shrink-0 rounded-xl bg-cover bg-center border border-slate-700 shadow-md"
+              style={{ backgroundImage: `url('${heroImage}')` }}
+            />
+            <div className="text-[11px] text-slate-400">
+              <span className="font-bold text-emerald-400 block mb-0.5">معاينة شاشات الكمبيوتر:</span>
+              تظهر بعرض 16:9 على اللابتوب.
+            </div>
+          </div>
+        )}
+
+        {heroMobileImage && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 flex items-center gap-3">
+            <div
+              className="h-16 w-12 shrink-0 rounded-xl bg-cover bg-center border border-slate-700 shadow-md"
+              style={{ backgroundImage: `url('${heroMobileImage}')` }}
+            />
+            <div className="text-[11px] text-slate-400">
+              <span className="font-bold text-sky-400 block mb-0.5">معاينة صورة الموبايل:</span>
+              تظهر كخلفية طولية كاملة بالهاتف.
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block font-bold text-slate-300">العنوان الرئيسي للهيرو:</label>
           <input
@@ -94,21 +143,18 @@ export function LoungeSettingsForm({
             required
           />
         </div>
-      </div>
 
-      {/* معاينة الصورة الحية عند إدخال الرابط */}
-      {heroImage && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 flex items-center gap-3">
-          <div
-            className="h-16 w-28 shrink-0 rounded-xl bg-cover bg-center border border-slate-700 shadow-md"
-            style={{ backgroundImage: `url('${heroImage}')` }}
+        <div>
+          <label className="mb-1 block font-bold text-slate-300">العنوان المكتوب للصالة:</label>
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="شارع النزهة - الحي الرابع - أمام سيتي سنتر"
+            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none focus:border-amber-400"
+            required
           />
-          <div className="text-[11px] text-slate-400">
-            <span className="font-bold text-emerald-400 block mb-0.5">معاينة غلاف الهيرو الحالي:</span>
-            ستظهر هذه الصورة في خلفية صفحة العميل الرئيسية بتأثير سينمائي.
-          </div>
         </div>
-      )}
+      </div>
 
       <div>
         <label className="mb-1 block font-bold text-slate-300">النص الفرعي / الوصف الترحيبي:</label>
@@ -121,21 +167,10 @@ export function LoungeSettingsForm({
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div>
-          <label className="mb-1 block font-bold text-slate-300">العنوان المكتوب للصالة:</label>
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder="شارع النزهة - الحي الرابع - أمام سيتي سنتر"
-            className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none focus:border-amber-400"
-            required
-          />
-        </div>
-
+      <div className="grid gap-4 md:grid-cols-3">
         <div>
           <label className="mb-1 block font-bold text-slate-300">
-            رابط تضمين خريطة جوجل (Google Maps Embed URL):
+            رابط تضمين خريطة جوجل (Google Maps Embed):
           </label>
           <input
             value={mapUrl}
@@ -144,9 +179,7 @@ export function LoungeSettingsForm({
             className="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs text-white outline-none focus:border-amber-400 font-mono"
           />
         </div>
-      </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block font-bold text-slate-300">رقم الهاتف للاتصال السريع:</label>
           <input
@@ -171,7 +204,7 @@ export function LoungeSettingsForm({
       <button
         type="submit"
         disabled={isPending}
-        className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-7 py-3 text-xs font-black text-slate-950 shadow-lg shadow-amber-950/30 hover:scale-[1.01] transition disabled:opacity-40"
+        className="rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-7 py-3.5 text-xs font-black text-slate-950 shadow-lg shadow-amber-950/30 hover:scale-[1.01] transition disabled:opacity-40"
       >
         {isPending ? "جاري الحفظ والتطبيق..." : "💾 حفظ إعدادات الهيرو والخريطة"}
       </button>
