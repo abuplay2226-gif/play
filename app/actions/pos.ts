@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-
 import { assertAuthorized } from "@/lib/auth-guard";
 import { prisma } from "@/lib/prisma";
 import type { PaymentMethod } from "@prisma/client";
@@ -18,6 +17,14 @@ function normalizeItems(
       quantity: Number(item.quantity),
       unitPrice: toNumber(item.unitPrice),
     }));
+}
+
+// دالة أمان للتأكد من وجود أعمدة customerId و notes في جدول Order
+async function ensureOrderColumns() {
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "customerId" TEXT;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Order" ADD COLUMN IF NOT EXISTS "notes" TEXT;`);
+  } catch {}
 }
 
 export async function getCategories() {
@@ -78,15 +85,19 @@ export async function createProduct(input: {
   return product;
 }
 
-// إنشاء الطلب مع دعم تحديد الخزينة التي يورد إليها الكاش (targetCashDrawerId)
+// 1. إنشاء الطلب (كاش فوري / تعليق لحساب جهاز / حساب كافيه مفتوح لعميل)
 export async function createOrder(input: {
   shiftId: string;
   sessionId?: string | null;
+  customerId?: string | null;
+  customerName?: string | null;
+  notes?: string | null;
   paymentMethod?: PaymentMethod;
-  targetCashDrawerId?: string; // الخزينة المحددة لتوريد النقدية
+  targetCashDrawerId?: string;
   items: Array<{ productId: string; quantity: number; unitPrice?: number | string | null }>;
 }) {
   await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
+  await ensureOrderColumns();
 
   const items = normalizeItems(input.items);
   if (items.length === 0) throw new Error("يجب إضافة صنف واحد على الأقل");
@@ -98,21 +109,36 @@ export async function createOrder(input: {
 
   if (!shift || shift.status !== "OPEN") throw new Error("لا توجد وردية مفتوحة للمعاملة");
 
-  const orderStatus = input.sessionId ? "PENDING" : "PAID";
-  const finalPaymentMethod = input.paymentMethod ?? (input.sessionId ? null : "CASH");
+  // إذا كان مربوطاً بجلسة أو حساب عميل معلق يكون PENDING، وإلا كاش فوري PAID
+  const isPendingOrder = Boolean(input.sessionId || input.customerId || input.customerName);
+  const orderStatus = isPendingOrder ? "PENDING" : "PAID";
+  const finalPaymentMethod = isPendingOrder ? null : (input.paymentMethod ?? "CASH");
 
   return await prisma.$transaction(async (tx) => {
+    // التحقق من العميل وإنشاء حساب سريع إن لزم
+    let targetCustomerId = input.customerId || null;
+    let customerLabel = input.customerName?.trim() || input.notes?.trim() || null;
+
+    if (!targetCustomerId && input.customerName?.trim()) {
+      const existingCust = await tx.customer.findFirst({
+        where: { name: { equals: input.customerName.trim(), mode: "insensitive" } },
+      });
+      if (existingCust) {
+        targetCustomerId = existingCust.id;
+        customerLabel = existingCust.name;
+      }
+    }
+
     const details = [];
 
     for (const item of items) {
-      // 1. جلب المنتج الأساسي
       const product = await tx.product.findUnique({
         where: { id: item.productId },
       });
 
       if (!product) throw new Error("إحدى المنتجات غير موجودة");
 
-      // 2. جلب مكونات الوصفة بشكل آمن متوافق مع البريزما
+      // خصم مكونات الوصفة (BOM) إن وجدت
       const recipeItems = ((await (tx as any).recipeItem?.findMany({
         where: { productId: item.productId },
         include: { ingredient: true },
@@ -122,13 +148,12 @@ export async function createOrder(input: {
         ingredient: { name: string; stockQuantity: number };
       }>;
 
-      // 3. إذا كان للمنتج مقادير ووصفة (BOM) يُخصم من المواد الخام
       if (recipeItems.length > 0) {
         for (const recipe of recipeItems) {
           const neededQty = recipe.quantity * item.quantity;
           if (recipe.ingredient.stockQuantity < neededQty) {
             throw new Error(
-              `خام (${recipe.ingredient.name}) غير كافي لتجهيز ${item.quantity} من ${product.name}`
+              `خام (${recipe.ingredient.name}) غير كافٍ لتجهيز ${item.quantity} من ${product.name}`
             );
           }
 
@@ -138,9 +163,9 @@ export async function createOrder(input: {
           });
         }
       } else {
-        // إذا كان منتجاً عادياً (مياه، كانز، شيبس) يُخصم بالقطعة
+        // خصم منتج مباشر
         if (product.stockQuantity < item.quantity) {
-          throw new Error(`المخزون غير كافي للصنف: ${product.name}`);
+          throw new Error(`المخزون غير كافٍ للصنف: ${product.name}`);
         }
 
         await tx.product.update({
@@ -162,10 +187,12 @@ export async function createOrder(input: {
 
     const totalAmount = Number(details.reduce((sum, i) => sum + i.subTotal, 0).toFixed(2));
 
-    const createdOrder = await tx.order.create({
+    const createdOrder = await (tx as any).order.create({
       data: {
         shiftId: input.shiftId,
         sessionId: input.sessionId ?? null,
+        customerId: targetCustomerId,
+        notes: customerLabel,
         totalAmount,
         paymentMethod: finalPaymentMethod ?? undefined,
         status: orderStatus,
@@ -176,7 +203,7 @@ export async function createOrder(input: {
       },
     });
 
-    // 4. توريد الكاش للخزينة المختارة أو خزينة الوردية كخيار افتراضي
+    // توريد الكاش للخزينة فوراً في حال البيع الكاش الفوري
     const finalDrawerId = input.targetCashDrawerId || shift.cashDrawerId;
 
     if (orderStatus === "PAID" && finalPaymentMethod === "CASH" && finalDrawerId) {
@@ -191,7 +218,7 @@ export async function createOrder(input: {
           shiftId: input.shiftId,
           type: "INCOME",
           amount: totalAmount,
-          description: `مبيعات كافيه (كاش سريع) - طلب #${createdOrder.id.slice(-6)}`,
+          description: `مبيعات كافيه (كاش فوري) - طلب #${createdOrder.id.slice(-6)}`,
         },
       });
     }
@@ -204,8 +231,214 @@ export async function createOrder(input: {
   });
 }
 
+// 2. تصفية ومحاسبة حساب كافيه مفتوح (Open Tab Checkout)
+export async function settleCafeOrder(input: {
+  orderId: string;
+  discountAmount?: number;
+  paidAmount: number;
+  paymentMethod: "CASH" | "CARD" | "DEBT";
+  targetCashDrawerId?: string;
+}) {
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
+  await ensureOrderColumns();
+
+  return await prisma.$transaction(async (tx) => {
+    const order = await (tx as any).order.findUnique({
+      where: { id: input.orderId },
+      include: {
+        items: { include: { product: true } },
+        shift: { include: { cashDrawer: true } },
+        customer: true,
+      },
+    });
+
+    if (!order || order.status !== "PENDING") {
+      throw new Error("الطلب غير موجود أو تمت محاسبته مسبقاً");
+    }
+
+    const discount = Number(input.discountAmount ?? 0);
+    const subTotal = order.totalAmount;
+    const finalPayable = Math.max(0, Number((subTotal - discount).toFixed(2)));
+    const paidAmount = Number(input.paidAmount);
+    const remainingDebt = Math.max(0, Number((finalPayable - paidAmount).toFixed(2)));
+
+    // إذا تبقى دين، يرحل على حساب العميل المسجل
+    if (remainingDebt > 0) {
+      if (!order.customerId) {
+        throw new Error("لا يمكن ترحيل دين على عميل غير مسجل في النظام");
+      }
+      await tx.customer.update({
+        where: { id: order.customerId },
+        data: { debt: { increment: remainingDebt } },
+      });
+    }
+
+    const finalDrawerId = input.targetCashDrawerId || order.shift?.cashDrawerId;
+
+    if (input.paymentMethod === "CASH" && paidAmount > 0 && finalDrawerId) {
+      await tx.cashDrawer.update({
+        where: { id: finalDrawerId },
+        data: { balance: { increment: paidAmount } },
+      });
+
+      await tx.financialTransaction.create({
+        data: {
+          cashDrawerId: finalDrawerId,
+          shiftId: order.shiftId,
+          customerId: order.customerId,
+          type: "INCOME",
+          amount: paidAmount,
+          description: `تحصيل حساب كافيه - طلب #${order.id.slice(-6)} (${order.notes || "عميل"})`,
+        },
+      });
+    }
+
+    if (input.paymentMethod === "CARD" && paidAmount > 0 && finalDrawerId) {
+      await tx.financialTransaction.create({
+        data: {
+          cashDrawerId: finalDrawerId,
+          shiftId: order.shiftId,
+          customerId: order.customerId,
+          type: "INCOME_CARD",
+          amount: paidAmount,
+          description: `تحصيل كافيه [فيزا] - طلب #${order.id.slice(-6)} (${order.notes || "عميل"})`,
+        },
+      });
+    }
+
+    const updated = await (tx as any).order.update({
+      where: { id: order.id },
+      data: {
+        totalAmount: finalPayable,
+        paymentMethod: input.paymentMethod,
+        status: "PAID",
+      },
+    });
+
+    revalidatePath("/pos");
+    revalidatePath("/cash-drawers");
+    revalidatePath("/customers");
+    revalidatePath("/receipt");
+
+    return {
+      success: true,
+      orderId: updated.id,
+      finalPayable,
+      paidAmount,
+      remainingDebt,
+    };
+  });
+}
+
+// 3. تعديل كميات الطلب عند الخطأ (إرجاع أو خصم المخزون تلقائياً)
+export async function updateOrderItems(input: {
+  orderId: string;
+  updatedItems: Array<{ productId: string; quantity: number }>;
+}) {
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
+
+  return await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: { id: input.orderId },
+      include: { items: { include: { product: true } } },
+    });
+
+    if (!order) throw new Error("الطلب غير موجود");
+    if (order.status === "PAID") {
+      throw new Error("لا يمكن تعديل طلب تم تسديده وإغلاقه؛ يمكنك إلغاؤه إن لزم الأمر");
+    }
+
+    // خريطة الأصناف السابقة لإرجاع المخزون بالكامل أولاً
+    for (const oldItem of order.items) {
+      await tx.product.update({
+        where: { id: oldItem.productId },
+        data: { stockQuantity: { increment: oldItem.quantity } },
+      });
+    }
+
+    // حذف البنود القديمة
+    await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+
+    // إضافة البنود الجديدة وخصم المخزون بالكميات المحدثة
+    const newDetails = [];
+    for (const item of input.updatedItems) {
+      if (item.quantity <= 0) continue;
+
+      const product = await tx.product.findUnique({ where: { id: item.productId } });
+      if (!product) throw new Error("الصنف غير موجود");
+
+      if (product.stockQuantity < item.quantity) {
+        throw new Error(`المخزون غير كافٍ للصنف: ${product.name}`);
+      }
+
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { stockQuantity: { decrement: item.quantity } },
+      });
+
+      const subTotal = Number((item.quantity * product.sellPrice).toFixed(2));
+      newDetails.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: product.sellPrice,
+        subTotal,
+      });
+    }
+
+    const newTotal = Number(newDetails.reduce((sum, i) => sum + i.subTotal, 0).toFixed(2));
+
+    const updatedOrder = await tx.order.update({
+      where: { id: order.id },
+      data: {
+        totalAmount: newTotal,
+        items: { create: newDetails },
+      },
+      include: { items: { include: { product: true } } },
+    });
+
+    revalidatePath("/pos");
+    revalidatePath("/inventory");
+    return updatedOrder;
+  });
+}
+
+// 4. نقل الطلب لوجهة أخرى (من جهاز لجهاز، أو من جهاز لعميل كافيه، أو العكس)
+export async function transferOrder(input: {
+  orderId: string;
+  targetType: "SESSION" | "CUSTOMER";
+  targetSessionId?: string | null;
+  targetCustomerId?: string | null;
+  targetCustomerName?: string | null;
+}) {
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
+  await ensureOrderColumns();
+
+  const updateData: any = {};
+
+  if (input.targetType === "SESSION") {
+    if (!input.targetSessionId) throw new Error("يجب تحديد الجهاز المستهدف");
+    updateData.sessionId = input.targetSessionId;
+    updateData.customerId = null;
+    updateData.notes = null;
+  } else {
+    updateData.sessionId = null;
+    updateData.customerId = input.targetCustomerId || null;
+    updateData.notes = input.targetCustomerName || "عميل كافيه";
+  }
+
+  const updated = await (prisma as any).order.update({
+    where: { id: input.orderId },
+    data: updateData,
+  });
+
+  revalidatePath("/pos");
+  revalidatePath("/devices");
+  return updated;
+}
+
+// 5. إلغاء الطلب بالكامل وإرجاع المخزون والخزينة
 export async function cancelOrder(orderId: string) {
-  await assertAuthorized(["ADMIN", "CASHIER"]);
+  await assertAuthorized(["ADMIN", "CASHIER", "STAFF"]);
 
   return await prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({
@@ -216,6 +449,7 @@ export async function cancelOrder(orderId: string) {
     if (!order) throw new Error("الطلب غير موجود");
     if (order.status === "CANCELLED") throw new Error("الطلب ملغي بالفعل");
 
+    // إرجاع المخزون للأصناف
     for (const item of order.items) {
       await tx.product.update({
         where: { id: item.productId },
@@ -223,6 +457,7 @@ export async function cancelOrder(orderId: string) {
       });
     }
 
+    // استرداد النقدية من الخزينة إن كان مسدداً كاش
     if (order.status === "PAID" && order.paymentMethod === "CASH" && order.shift?.cashDrawerId) {
       await tx.cashDrawer.update({
         where: { id: order.shift.cashDrawerId },
@@ -248,6 +483,7 @@ export async function cancelOrder(orderId: string) {
     revalidatePath("/pos");
     revalidatePath("/inventory");
     revalidatePath("/shifts");
+    revalidatePath("/cash-drawers");
     return cancelled;
   });
 }

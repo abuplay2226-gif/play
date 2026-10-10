@@ -20,7 +20,9 @@ export type LandingPagePackage = {
   hours: number;
   validityDays: number;
   drinksCount: number;
+  drinkName?: string;
   deviceType: string;
+  gameModeLabel: string;
   highlight: boolean;
   active: boolean;
   order: number;
@@ -48,7 +50,15 @@ export type LoungeSettings = {
 
 function parsePackageMeta(rawFeature?: string | null) {
   if (!rawFeature) {
-    return { hours: 5, validityDays: 30, drinksCount: 0, deviceType: "ALL", description: "باقة مميزة" };
+    return {
+      hours: 5,
+      validityDays: 30,
+      drinksCount: 0,
+      drinkName: "",
+      deviceType: "ALL",
+      gameModeLabel: "شامل",
+      description: "باقة مميزة",
+    };
   }
   try {
     const parsed = JSON.parse(rawFeature);
@@ -56,11 +66,21 @@ function parsePackageMeta(rawFeature?: string | null) {
       hours: Number(parsed.hours || 5),
       validityDays: Number(parsed.validityDays || 30),
       drinksCount: Number(parsed.drinksCount || 0),
+      drinkName: parsed.drinkName || "",
       deviceType: parsed.deviceType || "ALL",
+      gameModeLabel: parsed.gameModeLabel || "شامل الأنماط",
       description: parsed.description || `${parsed.hours || 5} ساعات لعب صالحة لمدة ${parsed.validityDays || 30} يوم`,
     };
   } catch {
-    return { hours: 5, validityDays: 30, drinksCount: 0, deviceType: "ALL", description: rawFeature };
+    return {
+      hours: 5,
+      validityDays: 30,
+      drinksCount: 0,
+      drinkName: "",
+      deviceType: "ALL",
+      gameModeLabel: "شامل",
+      description: rawFeature,
+    };
   }
 }
 
@@ -76,7 +96,6 @@ export async function getLoungeSettings(): Promise<LoungeSettings> {
     whatsapp: "201000000000",
   };
 
-  // 1. القراءة من جدول LoungeSetting عبر استعلام مباشر
   try {
     const rows: any = await prisma.$queryRawUnsafe(
       `SELECT * FROM "LoungeSetting" WHERE "id" = 'default' LIMIT 1`
@@ -95,11 +114,8 @@ export async function getLoungeSettings(): Promise<LoungeSettings> {
         whatsapp: r.whatsapp || defaults.whatsapp,
       };
     }
-  } catch {
-    // استمرار للقراءة الاحتياطية
-  }
+  } catch {}
 
-  // 2. القراءة الاحتياطية من ServiceOffer
   try {
     const settingRecord = await prisma.serviceOffer.findFirst({
       where: { title: "__LOUNGE_SETTINGS__" },
@@ -118,9 +134,7 @@ export async function getLoungeSettings(): Promise<LoungeSettings> {
         whatsapp: parsed.whatsapp || defaults.whatsapp,
       };
     }
-  } catch {
-    // في حال عدم وجود سجلات يتم إرجاع القيم الافتراضية
-  }
+  } catch {}
 
   return defaults;
 }
@@ -157,7 +171,9 @@ export async function getLandingPageContent(): Promise<{
       hours: meta.hours,
       validityDays: meta.validityDays,
       drinksCount: meta.drinksCount,
+      drinkName: meta.drinkName,
       deviceType: meta.deviceType,
+      gameModeLabel: meta.gameModeLabel,
       highlight: Boolean(p.highlight),
       active: Boolean(p.active),
       order: p.order,

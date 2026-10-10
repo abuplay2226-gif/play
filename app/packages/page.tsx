@@ -1,7 +1,6 @@
 import { requireRole } from "@/app/actions/auth";
 import {
   approveOnlinePackageRequest,
-  createPackagePlan,
   deletePackagePlan,
   getAllCustomerSubscriptions,
   getPackagePlans,
@@ -9,6 +8,7 @@ import {
   rejectOnlinePackageRequest,
   togglePackagePlan,
 } from "@/app/actions/packages";
+import { CreatePackageForm } from "@/components/create-package-form";
 import { CustomerPackageSubscribeForm } from "@/components/customer-package-subscribe-form";
 import { SiteShell } from "@/components/site-shell";
 import { prisma } from "@/lib/prisma";
@@ -16,14 +16,32 @@ import { prisma } from "@/lib/prisma";
 export default async function PackagesPage() {
   const user = await requireRole(["ADMIN", "CASHIER"]);
 
-  const [plans, subscriptions, pendingRequests, customers, openShift, cashDrawers] = await Promise.all([
+  const [
+    plans,
+    subscriptions,
+    pendingRequests,
+    customers,
+    openShift,
+    cashDrawers,
+    allDevices,
+    cafeProducts,
+  ] = await Promise.all([
     getPackagePlans(),
     getAllCustomerSubscriptions(),
     getPendingPackageRequests(),
     prisma.customer.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, phone: true } }),
     prisma.shift.findFirst({ where: { status: "OPEN" }, include: { cashDrawer: true } }),
     prisma.cashDrawer.findMany({ orderBy: { name: "asc" } }),
+    prisma.device.findMany({ select: { type: true } }),
+    prisma.product.findMany({
+      where: { isRawMaterial: false },
+      include: { category: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
+
+  // استخراج أنواع الأجهزة المسجلة فعلياً في الصالة بدون تكرار
+  const uniqueDeviceTypes = Array.from(new Set(allDevices.map((d) => d.type.trim())));
 
   const activePlansCount = plans.filter((p: any) => p.active).length;
   const activeSubsCount = subscriptions.filter((s: any) => s.isActive).length;
@@ -39,7 +57,7 @@ export default async function PackagesPage() {
     .map((p: any) => ({
       value: p.id,
       label: `${p.name} (${p.meta.hours} ساعة)`,
-      subLabel: `السعر: ${p.price} ج.م · صلاحية ${p.meta.validityDays} يوم`,
+      subLabel: `السعر: ${p.price} ج.م · ${p.meta.deviceType === "ALL" ? "جميع الأجهزة" : p.meta.deviceType} · ${p.meta.gameModeLabel}`,
     }));
 
   return (
@@ -168,100 +186,13 @@ export default async function PackagesPage() {
                 <span>إنشاء باقة جديدة للصالة</span>
               </h2>
               <p className="text-xs text-slate-400 mt-1 mb-4">
-                تحديد عدد الساعات، السعر، مدة الصلاحية، والمشروبات المجانية.
+                تحديد نوع الجهاز (من المسجلة)، النمط (ساعات/جيمات أو فردي/جماعي)، ونوع المشروب المجاني.
               </p>
 
-              <form action={createPackagePlan} className="space-y-3.5 text-xs">
-                <div>
-                  <label className="mb-1 block font-bold text-slate-300">اسم الباقة:</label>
-                  <input
-                    name="name"
-                    placeholder="مثال: باقة الأبطال VIP 10 ساعات"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-sky-400"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block font-bold text-slate-300">سعر الباقة (ج.م):</label>
-                    <input
-                      name="price"
-                      type="number"
-                      step="any"
-                      placeholder="400"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-amber-300 font-bold font-mono outline-none focus:border-amber-400"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block font-bold text-slate-300">عدد ساعات اللعب:</label>
-                    <input
-                      name="hours"
-                      type="number"
-                      defaultValue={10}
-                      min={1}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-emerald-400 font-bold font-mono outline-none focus:border-emerald-400"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block font-bold text-slate-300">الصلاحية (بالأيام):</label>
-                    <input
-                      name="validityDays"
-                      type="number"
-                      defaultValue={30}
-                      min={1}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white font-mono outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block font-bold text-slate-300">المشروبات المجانية:</label>
-                    <input
-                      name="drinksCount"
-                      type="number"
-                      defaultValue={0}
-                      min={0}
-                      placeholder="0"
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white font-mono outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1 block font-bold text-slate-300">الأجهزة المسموحة:</label>
-                  <select
-                    name="deviceType"
-                    defaultValue="ALL"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white outline-none"
-                  >
-                    <option value="ALL">جميع الأجهزة في الصالة</option>
-                    <option value="PS5">أجهزة PS5 فقط</option>
-                    <option value="VIP_ROOM">غرف الـ VIP فقط</option>
-                    <option value="PS4">أجهزة PS4 فقط</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <input type="checkbox" name="highlight" id="hl" value="true" className="rounded" />
-                  <label htmlFor="hl" className="text-slate-300 cursor-pointer">
-                    تمييز الباقة كباقة شائعة ومميزة في الصفحة الرئيسية ⭐
-                  </label>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full rounded-full bg-emerald-500 py-3 text-xs font-black text-slate-950 hover:bg-emerald-400 transition"
-                >
-                  + حفظ الباقة وطرحها للبيع
-                </button>
-              </form>
+              <CreatePackageForm
+                deviceTypes={uniqueDeviceTypes}
+                products={cafeProducts}
+              />
             </div>
           )}
         </div>
@@ -287,11 +218,13 @@ export default async function PackagesPage() {
                       <span className="font-mono font-black text-amber-300 text-sm">{p.price} ج.م</span>
                     </div>
 
-                    <div className="mt-2.5 space-y-1 text-xs text-slate-300">
+                    <div className="mt-2.5 space-y-1.5 text-xs text-slate-300">
                       <p>⏱️ وقت اللعب: <strong className="text-emerald-400">{p.meta.hours} ساعات</strong></p>
+                      <p>🎮 الأجهزة: <strong className="text-sky-300">{p.meta.deviceType === "ALL" ? "جميع الأجهزة" : p.meta.deviceType}</strong></p>
+                      <p>🎯 النمط: <strong className="text-amber-200">{p.meta.gameModeLabel}</strong></p>
                       <p>📅 مدة الصلاحية: <strong>{p.meta.validityDays} يوم</strong></p>
                       {p.meta.drinksCount > 0 && (
-                        <p>☕ مشاريب مجانية: <strong className="text-cyan-300">{p.meta.drinksCount} مشروب</strong></p>
+                        <p>☕ مشروبات: <strong className="text-cyan-300">{p.meta.drinksCount} {p.meta.drinkName || "مشروب"}</strong></p>
                       )}
                     </div>
                   </div>
@@ -337,7 +270,7 @@ export default async function PackagesPage() {
             <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-bold text-white">سجل اشتراكات وساعات العملاء</h3>
-                <p className="text-[11px] text-slate-400">متابعة رصيد الساعات المتبقية وصلاحية الباقة لكل عميل.</p>
+                <p className="text-[11px] text-slate-400">متابعة رصيد الساعات المتبقية وصلاحية الباقة ونمط اللعب لكل عميل.</p>
               </div>
               <span className="text-xs text-sky-400 font-mono font-bold">{subscriptions.length} اشتراك</span>
             </div>
@@ -348,8 +281,9 @@ export default async function PackagesPage() {
                   <tr>
                     <th className="px-3 py-2.5">العميل</th>
                     <th className="px-3 py-2.5">الباقة</th>
+                    <th className="px-3 py-2.5">الجهاز والنمط</th>
                     <th className="px-3 py-2.5 text-center">الرصيد المتبقي</th>
-                    <th className="px-3 py-2.5 text-center">تاريخ الانتهاء</th>
+                    <th className="px-3 py-2.5 text-center">الانتهاء</th>
                     <th className="px-3 py-2.5 text-center">الحالة</th>
                   </tr>
                 </thead>
@@ -361,6 +295,10 @@ export default async function PackagesPage() {
                         <p className="text-[10px] text-slate-500">{s.customerPhone}</p>
                       </td>
                       <td className="px-3 py-2.5 font-sans text-sky-300 font-bold">{s.planName}</td>
+                      <td className="px-3 py-2.5 font-sans text-slate-300 text-[11px]">
+                        <span>{s.deviceType === "ALL" ? "جميع الأجهزة" : s.deviceType}</span>
+                        <span className="text-amber-300 block text-[10px]">{s.gameModeLabel}</span>
+                      </td>
                       <td className="px-3 py-2.5 text-center font-bold text-emerald-400 text-sm">
                         {s.remainingHoursText}
                       </td>
@@ -383,7 +321,7 @@ export default async function PackagesPage() {
 
                   {subscriptions.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-slate-500 font-sans">
+                      <td colSpan={6} className="py-8 text-center text-slate-500 font-sans">
                         لا توجد اشتراكات باقات مسجلة بعد.
                       </td>
                     </tr>

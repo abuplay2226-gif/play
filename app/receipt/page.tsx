@@ -59,7 +59,6 @@ export default async function ReceiptPage({
       const mins = Math.max(0, Math.floor(diffMs / 60000));
       durationText = `${Math.floor(mins / 60)} س و ${mins % 60} د`;
 
-      // حساب أوقات الفردي والجماعي المنفصلة
       let singleMins = 0;
       let singleCost = 0;
       let multiMins = 0;
@@ -110,11 +109,12 @@ export default async function ReceiptPage({
       subTotal = timeCost + cafeSum;
     }
   } else if (orderId) {
-    const order = await prisma.order.findUnique({
+    const order = await (prisma as any).order.findUnique({
       where: { id: orderId },
       include: {
         shift: { include: { user: true } },
         items: { include: { product: true } },
+        customer: true,
       },
     });
 
@@ -125,49 +125,40 @@ export default async function ReceiptPage({
       finalTotal = order.totalAmount;
       subTotal = order.totalAmount;
 
-      ordersList = order.items.map((i) => ({
+      if (order.customer) {
+        customerName = order.customer.name;
+        customerPhone = order.customer.phone;
+        currentDebt = order.customer.debt;
+      } else if (order.notes) {
+        customerName = order.notes;
+      }
+
+      ordersList = order.items.map((i: any) => ({
         name: i.product.name,
         qty: i.quantity,
         total: `${i.subTotal.toFixed(2)}`,
       }));
     }
-  } else {
-    deviceName = "طاولة بلياردو 1";
-    durationText = "1 س و 15 د";
-    timeCost = 65.0;
-    timeBreakdown = [
-      { label: "لعب بالساعة", duration: "0 س و 45 د", cost: "45.00" },
-      { label: "لعب بالجيم", duration: "0 س و 30 د", cost: "20.00" },
-    ];
-    ordersList = [
-      { name: "شاي كرك", qty: 2, total: "30.00" },
-    ];
-    subTotal = 95.0;
-    finalTotal = 95.0;
   }
 
   return (
-    <SiteShell title="فاتورة الحساب">
+    <SiteShell title="فاتورة الحساب والريسيت الحراري">
       <div className="flex flex-col items-center">
-        {/* زر الطباعة في الشاشة فقط */}
         <div className="mb-6 flex gap-3 print:hidden">
           <ReceiptPrintButton />
         </div>
 
-        {/* جسم الفاتورة المصمم بمقاسات الطابعات الحرارية */}
         <div
           id="printable-receipt"
           className="receipt-box bg-white text-black shadow-xl"
           dir="rtl"
         >
-          {/* ترويسة الفاتورة */}
           <div className="receipt-header">
             <h2 className="title">PlayStation Lounge</h2>
             <p className="subtitle">كافيه وألعاب إلكترونية وبلياردو</p>
             <p className="inv-no">فاتورة #{invoiceNumber}</p>
           </div>
 
-          {/* بيانات الجلسة */}
           <div className="meta-section">
             <div className="row">
               <span className="lbl">التاريخ:</span>
@@ -195,20 +186,16 @@ export default async function ReceiptPage({
             </div>
           </div>
 
-          {/* البنود والأسعار */}
           <div className="items-section">
             <div className="items-header">
               <span>البند</span>
               <span>الإجمالي (ج.م)</span>
             </div>
 
-            {/* تفصيل الوقت المنفصل إن وجد تحويل */}
             {timeBreakdown.length > 0 ? (
               timeBreakdown.map((t, idx) => (
                 <div key={idx} className="item-row">
-                  <span>
-                    {t.label} ({t.duration})
-                  </span>
+                  <span>{t.label} ({t.duration})</span>
                   <span className="price font-mono">{t.cost}</span>
                 </div>
               ))
@@ -221,15 +208,12 @@ export default async function ReceiptPage({
 
             {ordersList.map((item, idx) => (
               <div key={idx} className="item-row">
-                <span>
-                  {item.name} × {item.qty}
-                </span>
+                <span>{item.name} × {item.qty}</span>
                 <span className="price font-mono">{item.total}</span>
               </div>
             ))}
           </div>
 
-          {/* المجاميع والديون */}
           <div className="totals-section">
             <div className="total-row">
               <span>المجموع قبل الخصم:</span>

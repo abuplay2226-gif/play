@@ -2,13 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { assertAuthorized } from "@/lib/auth-guard";
+import { isBilliardDevice } from "@/lib/device-utils";
 import { prisma } from "@/lib/prisma";
 
 export interface PackageMeta {
   hours: number;
   validityDays: number;
-  deviceType: "ALL" | "PS5" | "PS4" | "VIP_ROOM" | "PC";
+  deviceType: string;
+  gameMode: "ALL" | "SINGLE" | "MULTI";
+  gameModeLabel: string;
   drinksCount: number;
+  drinkType: "ANY" | "HOT" | "COLD" | "SPECIFIC";
+  drinkProductId?: string | null;
+  drinkName?: string;
   description: string;
 }
 
@@ -24,6 +30,9 @@ export interface CustomerSubscription {
   remainingMinutes: number;
   remainingHoursText: string;
   expiryDate: string;
+  deviceType: string;
+  gameModeLabel: string;
+  drinkName?: string;
   isExpired: boolean;
   isActive: boolean;
   createdAt: string;
@@ -39,13 +48,31 @@ export interface PackagePlanItem {
 }
 
 function parsePackageFeature(featureStr?: string | null): PackageMeta {
-  if (!featureStr) {
-    return { hours: 5, validityDays: 30, deviceType: "ALL", drinksCount: 0, description: "" };
-  }
+  const defaultMeta: PackageMeta = {
+    hours: 5,
+    validityDays: 30,
+    deviceType: "ALL",
+    gameMode: "ALL",
+    gameModeLabel: "شامل الأنماط",
+    drinksCount: 0,
+    drinkType: "ANY",
+    drinkName: "",
+    description: "",
+  };
+
+  if (!featureStr) return defaultMeta;
+
   try {
-    return JSON.parse(featureStr);
+    const parsed = JSON.parse(featureStr);
+    return {
+      ...defaultMeta,
+      ...parsed,
+      hours: Number(parsed.hours || 5),
+      validityDays: Number(parsed.validityDays || 30),
+      drinksCount: Number(parsed.drinksCount || 0),
+    };
   } catch {
-    return { hours: 5, validityDays: 30, deviceType: "ALL", drinksCount: 0, description: featureStr };
+    return { ...defaultMeta, description: featureStr };
   }
 }
 
@@ -65,7 +92,7 @@ export async function getPackagePlans(): Promise<PackagePlanItem[]> {
   }));
 }
 
-// 2. إنشاء باقة جديدة
+// 2. إنشاء باقة جديدة تدعم نمط اللعب ونوع المشروب ونوع الجهاز الديناميكي
 export async function createPackagePlan(formData: FormData): Promise<void> {
   await assertAuthorized(["ADMIN"]);
 
@@ -73,8 +100,13 @@ export async function createPackagePlan(formData: FormData): Promise<void> {
   const price = Number(formData.get("price") ?? 0);
   const hours = Number(formData.get("hours") ?? 5);
   const validityDays = Number(formData.get("validityDays") ?? 30);
-  const deviceType = String(formData.get("deviceType") ?? "ALL") as any;
+  const deviceType = String(formData.get("deviceType") ?? "ALL").trim();
+  const gameMode = String(formData.get("gameMode") ?? "ALL") as "ALL" | "SINGLE" | "MULTI";
+  const gameModeLabel = String(formData.get("gameModeLabel") ?? "").trim();
   const drinksCount = Number(formData.get("drinksCount") ?? 0);
+  const drinkType = String(formData.get("drinkType") ?? "ANY") as any;
+  const drinkProductId = String(formData.get("drinkProductId") ?? "").trim() || null;
+  const drinkName = String(formData.get("drinkName") ?? "").trim();
   const highlight = String(formData.get("highlight") ?? "false") === "true";
   const description = String(formData.get("description") ?? "").trim();
 
@@ -82,12 +114,36 @@ export async function createPackagePlan(formData: FormData): Promise<void> {
     throw new Error("اسم الباقة وسعرها وعدد ساعاتها حقول مطلوبة");
   }
 
+  const isBilliard = isBilliardDevice(deviceType);
+  const modeTitle =
+    gameModeLabel ||
+    (isBilliard
+      ? gameMode === "SINGLE"
+        ? "لعب بالساعة فقط"
+        : gameMode === "MULTI"
+        ? "لعب بالجيم فقط"
+        : "شامل (ساعات وجيمات)"
+      : gameMode === "SINGLE"
+      ? "لعب فردي فقط (Single)"
+      : gameMode === "MULTI"
+      ? "لعب جماعي فقط (Multi)"
+      : "شامل (فردي وجماعي)");
+
   const meta: PackageMeta = {
     hours,
     validityDays,
     deviceType,
+    gameMode,
+    gameModeLabel: modeTitle,
     drinksCount,
-    description: description || `${hours} ساعات لعب صالحة لمدة ${validityDays} يوم`,
+    drinkType,
+    drinkProductId,
+    drinkName: drinksCount > 0 ? (drinkName || "أي مشروب") : "",
+    description:
+      description ||
+      `${hours} ساعات (${deviceType === "ALL" ? "جميع الأجهزة" : deviceType}) · ${modeTitle}${
+        drinksCount > 0 ? ` · ${drinksCount} مشروب (${drinkName || "مجاني"})` : ""
+      }`,
   };
 
   await (prisma as any).packagePlan.create({
@@ -103,6 +159,7 @@ export async function createPackagePlan(formData: FormData): Promise<void> {
 
   revalidatePath("/packages");
   revalidatePath("/admin/content");
+  revalidatePath("/customer");
   revalidatePath("/");
 }
 
@@ -116,6 +173,7 @@ export async function togglePackagePlan(id: string, active: boolean): Promise<vo
   });
 
   revalidatePath("/packages");
+  revalidatePath("/customer");
   revalidatePath("/");
 }
 
@@ -126,6 +184,7 @@ export async function deletePackagePlan(id: string): Promise<void> {
   await (prisma as any).packagePlan.delete({ where: { id } });
 
   revalidatePath("/packages");
+  revalidatePath("/customer");
   revalidatePath("/");
 }
 
@@ -157,7 +216,10 @@ export async function subscribeCustomerToPackage(input: {
       usedMinutes: 0,
       expiryDate: expiryDate.toISOString(),
       drinksCount: meta.drinksCount,
+      drinkName: meta.drinkName,
       deviceType: meta.deviceType,
+      gameMode: meta.gameMode,
+      gameModeLabel: meta.gameModeLabel,
     };
 
     const drawerId = input.cashDrawerId;
@@ -239,6 +301,9 @@ export async function getCustomerActivePackages(customerId: string): Promise<Cus
         remainingMinutes: remaining,
         remainingHoursText: `${remHours} س ${remMins > 0 ? `و ${remMins} د` : ""}`,
         expiryDate: sub.expiryDate,
+        deviceType: sub.deviceType || "ALL",
+        gameModeLabel: sub.gameModeLabel || "شامل",
+        drinkName: sub.drinkName,
         isExpired,
         isActive: !isExpired,
         createdAt: t.createdAt.toISOString(),
@@ -290,6 +355,9 @@ export async function getAllCustomerSubscriptions(): Promise<CustomerSubscriptio
         remainingMinutes: remaining,
         remainingHoursText: `${remHours} س ${remMins > 0 ? `و ${remMins} د` : ""}`,
         expiryDate: sub.expiryDate,
+        deviceType: sub.deviceType || "ALL",
+        gameModeLabel: sub.gameModeLabel || "شامل",
+        drinkName: sub.drinkName,
         isExpired,
         isActive: !isExpired,
         createdAt: t.createdAt.toISOString(),
@@ -343,6 +411,7 @@ export async function deductMinutesFromPackage(customerId: string, minutesToDedu
   revalidatePath("/packages");
   revalidatePath("/customer");
 }
+
 // 9. تقديم العميل لطلب اشتراك باقة من الموقع الإلكتروني
 export async function requestPackageOnline(input: {
   packageId: string;
@@ -353,7 +422,6 @@ export async function requestPackageOnline(input: {
   const plan = await (prisma as any).packagePlan.findUnique({ where: { id: input.packageId } });
   if (!plan) throw new Error("الباقة غير موجودة");
 
-  // تسجيل أو تحديث بيانات العميل
   const customer = await prisma.customer.upsert({
     where: { phone: input.phone },
     update: { name: input.name },
@@ -365,7 +433,6 @@ export async function requestPackageOnline(input: {
     },
   });
 
-  // تسجيل إشعار وطلب معلق للإدارة
   await (prisma as any).notification.create({
     data: {
       title: "طلب باقة أونلاين جديد 🎁",
@@ -420,7 +487,6 @@ export async function approveOnlinePackageRequest(input: {
 }) {
   await assertAuthorized(["ADMIN", "CASHIER"]);
 
-  // تفعيل الباقة للعميل
   await subscribeCustomerToPackage({
     packageId: input.packageId,
     customerId: input.customerId,
@@ -429,7 +495,6 @@ export async function approveOnlinePackageRequest(input: {
     paymentMethod: input.paymentMethod,
   });
 
-  // تحديد الطلب كمكتمل
   await (prisma as any).notification.update({
     where: { id: input.requestId },
     data: { readAt: new Date() },

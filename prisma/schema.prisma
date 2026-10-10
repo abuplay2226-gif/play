@@ -257,8 +257,11 @@ model Order {
   id            String         @id @default(uuid())
   shiftId       String
   sessionId     String?
+  customerId    String?        // ربط اختياري بعميل للكافيه
+  notes         String?        // اسم العميل أو الطاولة أو ملاحظة الطلب
   shift         Shift          @relation(fields: [shiftId], references: [id])
   session       DeviceSession? @relation(fields: [sessionId], references: [id])
+  customer      Customer?      @relation(fields: [customerId], references: [id])
   items         OrderItem[]
   totalAmount   Float          @default(0.0)
   paymentMethod PaymentMethod?
@@ -320,6 +323,7 @@ model Customer {
   loyaltyPts               Int                     @default(0)
   debt                     Float                   @default(0.0)
   sessions                 DeviceSession[]
+  orders                   Order[]
   bookings                 Booking[]
   notifications            Notification[]
   tournamentParticipations TournamentParticipant[]
@@ -391,15 +395,16 @@ model CustomerReview {
 }
 
 model LoungeSetting {
-  id           String   @id @default("default")
-  heroImage    String?
-  heroTitle    String?  @default("أهلاً بك في أفضل صالة ألعاب وبلياردو")
-  heroSubtitle String?  @default("أجواء استثنائية، بطولات حماسية، ومشروبات مميزة بانتظارك!")
-  address      String?  @default("شارع النزهة - بجوار سيتي سنتر")
-  mapUrl       String?
-  phone        String?  @default("01000000000")
-  whatsapp     String?  @default("201000000000")
-  updatedAt    DateTime @default(now()) @updatedAt
+  id              String   @id @default("default")
+  heroImage       String?
+  heroMobileImage String?
+  heroTitle       String?  @default("أهلاً بك في أفضل صالة ألعاب وبلياردو")
+  heroSubtitle    String?  @default("أجواء استثنائية، بطولات حماسية، ومشروبات مميزة بانتظارك!")
+  address         String?  @default("شارع النزهة - الحي الرابع - أمام سيتي سنتر")
+  mapUrl          String?
+  phone           String?  @default("01000000000")
+  whatsapp        String?  @default("201000000000")
+  updatedAt       DateTime @default(now()) @updatedAt
 }
 
 // -------------------------------------------------------------
